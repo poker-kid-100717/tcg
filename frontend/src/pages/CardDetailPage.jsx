@@ -3,7 +3,7 @@ import { useParams, Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import apiService from '../services/api';
 import cartService from '../services/cartService';
-import authService from '../services/authService';
+import wishlistService from '../services/wishlistService';
 import { formatPrice, formatRarity, formatDate, generateSellerData } from '../utils/formatters';
 import { useLocalStorage } from '../utils/hooks';
 import PriceChart from '../components/PriceChart';
@@ -19,7 +19,7 @@ export default function CardDetailPage() {
   const [quantity, setQuantity] = useState(1);
   const [isWishlisted, setIsWishlisted] = useState(false);
   const [user] = useLocalStorage('pokemonTCGUser', null);
-  const [cart, setCart] = useLocalStorage('pokemonTCGCart', cartService.getCart());
+  const [, setCart] = useLocalStorage('pokemonTCGCart', cartService.getCart());
   const [sellerData, setSellerData] = useState([]);
   const [selectedSeller, setSelectedSeller] = useState(null);
   const [addedToCart, setAddedToCart] = useState(false);
@@ -47,9 +47,14 @@ export default function CardDetailPage() {
         const sellers = generateSellerData(cardId);
         setSelectedSeller(sellers[0]);
         
-        // Check if card is in user's wishlist
-        if (user && user.wishlist) {
-          setIsWishlisted(user.wishlist.includes(cardId));
+        // Check if card is in the user's server-side wishlist
+        if (user) {
+          try {
+            const wishlist = await wishlistService.getWishlist();
+            setIsWishlisted(wishlist.some((item) => item.cardId === cardId));
+          } catch (wishlistError) {
+            console.error('Error fetching wishlist:', wishlistError);
+          }
         }
       } catch (error) {
         console.error('Error fetching card data:', error);
@@ -82,20 +87,23 @@ export default function CardDetailPage() {
   };
   
   // Handle wishlist toggling
-  const handleWishlistToggle = () => {
+  const handleWishlistToggle = async () => {
     if (!user) {
       // Redirect to login
       window.location.href = `/login?redirect=/cards/${cardId}`;
       return;
     }
-    
-    if (isWishlisted) {
-      authService.removeFromWishlist(cardId);
-    } else {
-      authService.addToWishlist(cardId);
+
+    try {
+      if (isWishlisted) {
+        await wishlistService.removeFromWishlist(cardId);
+      } else {
+        await wishlistService.addToWishlist(cardId);
+      }
+      setIsWishlisted(!isWishlisted);
+    } catch (error) {
+      console.error('Error updating wishlist:', error);
     }
-    
-    setIsWishlisted(!isWishlisted);
   };
 
   if (loading) {

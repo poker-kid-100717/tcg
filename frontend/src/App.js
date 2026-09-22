@@ -11,6 +11,9 @@ import SearchPage from './pages/SearchPage';
 import CartPage from './pages/CartPage';
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
+import CheckoutPage from './pages/CheckoutPage';
+import OrdersPage from './pages/OrdersPage';
+import WishlistPage from './pages/WishlistPage';
 
 function App() {
   return (
@@ -29,11 +32,13 @@ function App() {
             <Route path="/login" element={<LoginPage />} />
             <Route path="/register" element={<RegisterPage />} />
             
+            {/* Real, backend-backed routes */}
+            <Route path="/checkout" element={<CheckoutPage />} />
+            <Route path="/orders" element={<OrdersPage />} />
+            <Route path="/wishlist" element={<WishlistPage />} />
+
             {/* Placeholder routes */}
-            <Route path="/checkout" element={<div className="container-custom py-12"><h1 className="text-3xl font-bold">Checkout Page</h1><p className="mt-4">This is a placeholder for the checkout page. In a full implementation, this would include payment processing.</p></div>} />
             <Route path="/account" element={<div className="container-custom py-12"><h1 className="text-3xl font-bold">Account Page</h1><p className="mt-4">This is a placeholder for the account page.</p></div>} />
-            <Route path="/orders" element={<div className="container-custom py-12"><h1 className="text-3xl font-bold">Orders Page</h1><p className="mt-4">This is a placeholder for the orders history page.</p></div>} />
-            <Route path="/wishlist" element={<div className="container-custom py-12"><h1 className="text-3xl font-bold">Wishlist Page</h1><p className="mt-4">This is a placeholder for the wishlist page.</p></div>} />
             <Route path="/special-deals" element={<div className="container-custom py-12"><h1 className="text-3xl font-bold">Special Deals</h1><p className="mt-4">This is a placeholder for the special deals page.</p></div>} />
             <Route path="/bulk-cards" element={<div className="container-custom py-12"><h1 className="text-3xl font-bold">Bulk Cards</h1><p className="mt-4">This is a placeholder for the bulk cards page.</p></div>} />
             <Route path="/price-guide" element={<div className="container-custom py-12"><h1 className="text-3xl font-bold">Price Guide</h1><p className="mt-4">This is a placeholder for the price guide page.</p></div>} />
