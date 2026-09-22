@@ -1,0 +1,127 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Montserrat:wght@400;500;600;700;800&display=swap');
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+  
+  body {
+    @apply bg-pokemon-background text-gray-800 font-sans;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-heading font-bold;
+  }
+
+  h1 {
+    @apply text-3xl md:text-4xl lg:text-5xl;
+  }
+
+  h2 {
+    @apply text-2xl md:text-3xl lg:text-4xl;
+  }
+
+  h3 {
+    @apply text-xl md:text-2xl lg:text-3xl;
+  }
+}
+
+@layer components {
+  .btn {
+    @apply px-4 py-2 rounded font-medium transition-all duration-200 inline-flex items-center justify-center;
+  }
+  
+  .btn-primary {
+    @apply btn bg-primary-600 text-white hover:bg-primary-700;
+  }
+  
+  .btn-secondary {
+    @apply btn bg-secondary-600 text-white hover:bg-secondary-700;
+  }
+
+  .btn-outline {
+    @apply btn border border-primary-600 text-primary-600 hover:bg-primary-50;
+  }
+
+  .card {
+    @apply bg-white rounded-lg shadow-card transition-all duration-200 overflow-hidden;
+  }
+
+  .card-hover {
+    @apply hover:shadow-card-hover hover:-translate-y-1;
+  }
+
+  .input {
+    @apply w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500;
+  }
+
+  .badge {
+    @apply px-2 py-1 text-xs font-medium rounded-full;
+  }
+
+  .badge-pokemon {
+    @apply bg-pokemon-red text-white;
+  }
+  
+  .badge-rare {
+    @apply bg-pokemon-yellow text-pokemon-dark;
+  }
+
+  .badge-common {
+    @apply bg-gray-200 text-gray-800;
+  }
+
+  .container-custom {
+    @apply max-w-7xl mx-auto px-4 sm:px-6 lg:px-8;
+  }
+}
+
+/* Card hover effect */
+.card-3d-effect {
+  transform-style: preserve-3d;
+  perspective: 1000px;
+}
+
+.card-3d-effect:hover .card-inner {
+  transform: rotateY(5deg);
+}
+
+.card-inner {
+  transition: transform 0.5s ease;
+}
+
+/* Price history chart styles */
+.chart-container {
+  @apply mt-4 h-64 md:h-80 w-full;
+}
+
+.filter-active {
+  @apply bg-primary-100 text-primary-800 font-medium;
+}
+
+/* Loading animation */
+.loading-spinner {
+  @apply w-8 h-8 border-4 border-primary-200 rounded-full border-t-primary-600 animate-spin;
+}
+
+/* Custom scroll bar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-gray-100;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-gray-400 rounded;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-gray-500;
+}
