@@ -11,6 +11,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+builder.Services.AddMemoryCache();
 
 // Add CORS
 builder.Services.AddCors(options =>
@@ -23,9 +24,12 @@ builder.Services.AddCors(options =>
     });
 });
 
-// Add DbContext
+// Add DbContext - SQLite file database so data survives restarts with zero
+// external infrastructure (no Docker/SQL Server required to run this project).
+var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
+    ?? "Data Source=pokemontcg.db";
 builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseInMemoryDatabase("PokemonTcgDb"));
+    options.UseSqlite(connectionString));
 
 // Add services
 builder.Services.AddHttpClient<PokemonTcgService>(client =>
@@ -37,8 +41,30 @@ builder.Services.AddHttpClient<PokemonTcgService>(client =>
 builder.Services.AddScoped<IUserService, UserService>();
 builder.Services.AddScoped<ITokenService, TokenService>();
 
-// Configure JWT authentication
+// Configure JWT authentication. The signing key is never hardcoded here: it
+// is read from configuration, which in a real deployment means an
+// environment variable (JwtSettings__Key) or a secret store such as
+// `dotnet user-secrets` / Azure Key Vault / AWS Secrets Manager - never
+// appsettings.json. In Development only, a fixed non-production fallback
+// key is used so the project runs immediately after `dotnet run` with no
+// setup step.
 var jwtSettings = builder.Configuration.GetSection("JwtSettings");
+var jwtKey = jwtSettings["Key"];
+if (string.IsNullOrWhiteSpace(jwtKey))
+{
+    if (builder.Environment.IsDevelopment())
+    {
+        jwtKey = "dev-only-insecure-signing-key-do-not-use-in-production-1234567890";
+        builder.Configuration["JwtSettings:Key"] = jwtKey;
+    }
+    else
+    {
+        throw new InvalidOperationException(
+            "JwtSettings:Key is not configured. Set it via the JwtSettings__Key " +
+            "environment variable or a secret store before running outside Development.");
+    }
+}
+
 builder.Services.AddAuthentication(opt =>
 {
     opt.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
@@ -54,7 +80,7 @@ builder.Services.AddAuthentication(opt =>
         ValidateIssuerSigningKey = true,
         ValidIssuer = jwtSettings["Issuer"],
         ValidAudience = jwtSettings["Audience"],
-        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSettings["Key"]))
+        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey))
     };
 });
 

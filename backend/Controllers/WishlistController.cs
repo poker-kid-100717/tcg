@@ -43,7 +43,7 @@ namespace PokemonTCG.API.Controllers
                             wishlistItemId = item.Id,
                             cardId = item.CardId,
                             addedAt = item.AddedAt,
-                            card = cardJson.RootElement.GetProperty("data")
+                            card = (object?)cardJson.RootElement.GetProperty("data")
                         };
                     }
                     catch

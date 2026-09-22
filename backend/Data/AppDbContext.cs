@@ -42,7 +42,7 @@ namespace PokemonTCG.API.Data
     {
         public static void Initialize(AppDbContext context)
         {
-            context.Database.EnsureCreated();
+            context.Database.Migrate();
 
             // Look for existing users
             if (context.Users.Any())

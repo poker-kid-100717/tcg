@@ -24,8 +24,13 @@ namespace PokemonTCG.API.Services
         public string GenerateJwtToken(User user)
         {
             var tokenHandler = new JwtSecurityTokenHandler();
-            var key = Encoding.ASCII.GetBytes(_configuration["JwtSettings:Key"]);
-            
+            var keyValue = _configuration["JwtSettings:Key"]
+                ?? throw new InvalidOperationException("JwtSettings:Key is not configured.");
+            var key = Encoding.ASCII.GetBytes(keyValue);
+            var durationMinutes = double.TryParse(_configuration["JwtSettings:DurationInMinutes"], out var minutes)
+                ? minutes
+                : 60;
+
             var tokenDescriptor = new SecurityTokenDescriptor
             {
                 Subject = new ClaimsIdentity(new[]
@@ -34,7 +39,7 @@ namespace PokemonTCG.API.Services
                     new Claim(ClaimTypes.Name, user.Username),
                     new Claim(ClaimTypes.Email, user.Email)
                 }),
-                Expires = DateTime.UtcNow.AddMinutes(double.Parse(_configuration["JwtSettings:DurationInMinutes"])),
+                Expires = DateTime.UtcNow.AddMinutes(durationMinutes),
                 SigningCredentials = new SigningCredentials(new SymmetricSecurityKey(key), SecurityAlgorithms.HmacSha256Signature),
                 Issuer = _configuration["JwtSettings:Issuer"],
                 Audience = _configuration["JwtSettings:Audience"]
@@ -50,11 +55,18 @@ namespace PokemonTCG.API.Services
                 return null;
 
             var tokenHandler = new JwtSecurityTokenHandler();
-            var key = Encoding.ASCII.GetBytes(_configuration["JwtSettings:Key"]);
+            var keyValue = _configuration["JwtSettings:Key"];
+            if (string.IsNullOrEmpty(keyValue))
+                return null;
+            var key = Encoding.ASCII.GetBytes(keyValue);
 
             try
             {
-                tokenHandler.ValidateToken(token, new TokenValidationParameters
+                // ValidateToken maps the raw short JWT claim names (e.g. "nameid") back
+                // onto the standard ClaimTypes used when the token was issued, so we read
+                // the identifier from the returned ClaimsPrincipal rather than the raw
+                // JwtSecurityToken payload, whose claim types are not yet mapped.
+                var principal = tokenHandler.ValidateToken(token, new TokenValidationParameters
                 {
                     ValidateIssuerSigningKey = true,
                     IssuerSigningKey = new SymmetricSecurityKey(key),
@@ -64,10 +76,9 @@ namespace PokemonTCG.API.Services
                     ValidAudience = _configuration["JwtSettings:Audience"],
                     // Set clockskew to zero so tokens expire exactly at token expiration time
                     ClockSkew = TimeSpan.Zero
-                }, out SecurityToken validatedToken);
+                }, out _);
 
-                var jwtToken = (JwtSecurityToken)validatedToken;
-                var userId = int.Parse(jwtToken.Claims.First(x => x.Type == ClaimTypes.NameIdentifier).Value);
+                var userId = int.Parse(principal.FindFirst(ClaimTypes.NameIdentifier)!.Value);
 
                 return userId;
             }
