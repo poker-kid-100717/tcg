@@ -1,128 +1,173 @@
 # Pokémon TCG Marketplace
 
-A full-stack application that replicates the functionality of TCGplayer.com, focused exclusively on Pokémon cards. This application allows users to browse, search, and view details of Pokémon cards, as well as simulated marketplace features.
+A full-stack marketplace for Pokémon trading cards: browse the full card catalog,
+track price history and investment potential, and manage a cart, wishlist and
+order history behind real authentication.
+
+- **Backend**: ASP.NET Core 8 Web API, EF Core over SQLite, JWT auth (BCrypt password hashing)
+- **Frontend**: React 19 (Create React App), Tailwind CSS, Chart.js, React Router
 
 ## Features
 
-- **Pokémon Card Browsing**: Browse and filter through thousands of Pokémon cards
-- **Set Explorer**: View and browse all Pokémon card sets
-- **Search Functionality**: Search for specific cards by name or other attributes
-- **Card Details**: View detailed information about each card, including images and pricing
-- **Price History**: View price history charts and trends for cards
-- **Investment Analysis**: Get predictions on card value and investment potential
-- **Shopping Cart**: Add cards to cart and manage quantities
-- **User Authentication**: Sign in/sign up functionality with JWT authentication
-- **Wishlist**: Save favorite cards to your wishlist
-- **Order History**: View past orders and their details
+- **Card catalog** - browse, filter and search the full Pokémon card database (via the public [Pokémon TCG API](https://docs.pokemontcg.io/))
+- **Set explorer** - browse cards by set, with set metadata and symbols
+- **Price history & investment analysis** - per-card price trend chart and a computed investment-potential rating (rarity, price growth, set rotation, popularity)
+- **Accounts** - register/login issuing a JWT, passwords hashed with BCrypt, never stored or transmitted in the clear
+- **Cart** - guest-friendly, persisted in the browser via `localStorage`
+- **Checkout, orders & wishlist** - require sign-in; persisted server-side per user in SQLite so they survive a page refresh, a different device, or a backend restart
 
-## Technology Stack
+## Tech stack
 
-### Frontend
-- **Framework**: React.js with functional components and hooks
-- **Styling**: TailwindCSS for responsive design
-- **Animations**: Framer Motion for smooth animations
-- **Charts**: Chart.js for price history visualization
-- **Routing**: React Router for navigation
-
-### Backend
-- **.NET Core 8**: Latest version of the .NET framework
-- **Entity Framework Core**: For database operations (In-Memory for this demo)
-- **JWT Authentication**: For secure user authentication
-- **RESTful API**: Clean API design following REST principles
-- **Swagger**: API documentation
-
-## Getting Started
-
-### Prerequisites
-
-- Node.js (v14+)
-- .NET SDK 8.0
-- npm or yarn
-
-### Installation
-
-1. Clone the repository
-
-2. Set up the backend:
-   ```
-   cd backend
-   dotnet restore
-   dotnet run
-   ```
-
-3. Set up the frontend:
-   ```
-   cd frontend
-   yarn install
-   yarn start
-   ```
-
-4. Open http://localhost:3000 in your browser
-
-## Demo Credentials
-
-For testing the user authentication features, you can use the following credentials:
-
-- **Email**: ash@pokemon.com
-- **Password**: pikachu123
-
-## API Integration
-
-This application uses the [Pokémon TCG API](https://docs.pokemontcg.io/) for card data. The backend serves as a proxy to this API while adding additional features like:
-
-- Caching for improved performance
-- User authentication and authorization
-- Wishlist management
-- Order history
-- Investment analysis and price prediction
-
-## Deployment
-
-### Frontend Deployment to Vercel
-
-1. Create a Vercel account if you don't have one
-2. Install the Vercel CLI:
-   ```
-   npm install -g vercel
-   ```
-3. Navigate to the frontend directory:
-   ```
-   cd frontend
-   ```
-4. Run the deployment command:
-   ```
-   vercel
-   ```
-5. Follow the prompts to deploy your application
-
-### Backend Deployment to Azure
-
-1. Create an Azure account if you don't have one
-2. Install the Azure CLI
-3. Login to Azure:
-   ```
-   az login
-   ```
-4. Create an App Service plan:
-   ```
-   az appservice plan create --name myPlan --resource-group myResourceGroup --sku FREE
-   ```
-5. Create a Web App:
-   ```
-   az webapp create --resource-group myResourceGroup --plan myPlan --name myApp --runtime "DOTNET|8.0"
-   ```
-6. Deploy your code:
-   ```
-   az webapp deployment source config-local-git --name myApp --resource-group myResourceGroup
-   ```
+| Layer | Technology |
+|---|---|
+| Backend | ASP.NET Core 8, EF Core 8, SQLite, JWT Bearer auth, BCrypt.Net, Swagger |
+| Frontend | React 19, React Router 7, Tailwind CSS, Chart.js, Axios |
+| Testing | xUnit (backend), Jest + React Testing Library (frontend) |
+| CI | GitHub Actions - builds and tests both projects on every push/PR to `main` |
 
 ## Architecture
 
-The application follows a clean architecture pattern:
+```
+backend/            ASP.NET Core Web API
+  Controllers/       Auth, Cards, Sets, Data, Orders, Wishlist
+  Services/          UserService, TokenService, PokemonTcgService
+  Models/            User, Order, OrderItem, WishlistItem
+  Data/               AppDbContext + EF Core migrations
+backend.Tests/       xUnit tests for the services and controllers above
 
-- **Controllers**: Handle HTTP requests and responses
-- **Services**: Contain business logic and interact with external APIs
-- **Models**: Define data structures
-- **Data**: Handles database operations
+frontend/
+  src/pages/          Route-level components (Shop, Cart, Checkout, Orders, ...)
+  src/components/     Reusable UI (Header, CardGrid, PriceChart, ...)
+  src/services/        api.js (public card catalog), authService/ordersService/
+                        wishlistService (backend), cartService (local cart)
+```
 
-Enjoy exploring the world of Pokémon TCG!
+**Why SQLite, not SQL Server or a hosted database?** The original scaffold used
+EF Core's `InMemoryDatabase` provider, which throws away all data on every
+restart - registrations, orders and wishlists all vanished the moment the
+process stopped. SQLite is a real, ACID-compliant relational database that
+needs zero external infrastructure: `dotnet run` creates and migrates a single
+`pokemontcg.db` file next to the project, so anyone cloning this repo can run
+it immediately without installing or provisioning a database server. EF Core
+migrations (`backend/Migrations/`) manage the schema, exactly as they would
+against SQL Server or PostgreSQL in a larger deployment - swapping the
+provider later is a one-line change in `Program.cs`.
+
+**Why does the frontend call the public Pokémon TCG API directly for card
+data, when the backend also has `CardsController`/`SetsController`?** Card and
+set data is public, read-only and doesn't need authentication, so the
+frontend fetches it straight from `api.pokemontcg.io` - one fewer network hop,
+and the browser can cache responses itself. The backend's `CardsController`,
+`SetsController` and `DataController` proxy the same API with server-side
+caching (`IMemoryCache`, via `PokemonTcgService`), which is what you'd want if
+this were deployed behind an API key that must stay server-side, or if you
+wanted to shield the frontend from the third-party API's rate limits. Both
+paths are real, tested code; the frontend's choice of the direct path is a
+deliberate simplification for a project with no API key to protect.
+
+**Auth**: `AuthController` issues a JWT on register/login (`TokenService`),
+signed with a key that is **never committed** - see below. `OrdersController`
+and `WishlistController` are `[Authorize]`-protected and resolve the calling
+user from the JWT's `NameIdentifier` claim, so a user can only ever see or
+modify their own orders and wishlist.
+
+## Running locally
+
+### Prerequisites
+
+- [.NET SDK 8.0](https://dotnet.microsoft.com/download)
+- [Node.js 20+](https://nodejs.org/) and npm
+
+### Backend
+
+```bash
+cd backend
+dotnet restore
+dotnet run
+```
+
+The API listens on `http://localhost:5259` by default (see
+`backend/Properties/launchSettings.json`) and serves Swagger UI at `/swagger`
+in Development. On first run it applies EF Core migrations and seeds two demo
+users:
+
+| Email | Password |
+|---|---|
+| `ash@pokemon.com` | `pikachu123` |
+| `gary@pokemon.com` | `blastoise456` |
+
+**JWT signing key**: in `Development`, a fixed non-production key is used
+automatically so the project runs with zero setup. For anything beyond local
+development, set a real key via an environment variable instead of editing
+`appsettings.json`:
+
+```bash
+export JwtSettings__Key="a long, random, environment-specific secret"
+# or, for local secret storage instead of an env var:
+dotnet user-secrets set "JwtSettings:Key" "a long, random secret"
+```
+
+If `JwtSettings:Key` is unset outside Development, the app fails fast at
+startup with a clear error rather than silently signing tokens with nothing.
+
+### Frontend
+
+```bash
+cd frontend
+npm install
+npm start
+```
+
+Opens on `http://localhost:3000`. It talks to the backend via
+`REACT_APP_API_URL` (see `frontend/.env.example`; defaults to
+`http://localhost:5259/api`).
+
+### Running both together
+
+Start the backend first (so the API is listening), then the frontend in a
+second terminal. Register a new account or sign in with the demo credentials
+above, add a few cards to your cart, and check out - the order is created via
+`POST /api/orders` and is visible on the Orders page even after you restart
+the backend, since it's persisted in `backend/pokemontcg.db`.
+
+## Tests
+
+### Backend
+
+```bash
+dotnet test PokemonTcgMarketplace.sln
+```
+
+Covers `TokenService` (JWT issue/validate round-trip, tampered-signature
+rejection), `UserService` (password hashing, wishlist and order persistence,
+per-user isolation), `AuthController` (register/login success and failure
+paths), `OrdersController` (create + list orders for the authenticated user)
+and `PokemonTcgService` (response parsing and its in-memory caching, against a
+stubbed `HttpMessageHandler` - no real network calls).
+
+### Frontend
+
+```bash
+cd frontend
+npm test
+```
+
+Covers the pure formatting/utility functions and `authService`'s handling of
+successful and failed login/register calls, asserting in particular that
+neither the plaintext password nor the JWT ever end up in the persisted user
+profile.
+
+## Security notes
+
+- Passwords are hashed with BCrypt (`BCrypt.Net-Next`) before they ever reach
+  the database; the API never stores or returns a plaintext password.
+- The JWT signing key is read from configuration/environment, not hardcoded -
+  see "JWT signing key" above.
+- CORS is currently wide open (`AllowAnyOrigin`) to keep local development
+  simple; a real deployment should restrict it to the frontend's actual
+  origin.
+- This repository's history (prior to the cleanup commit) contains a
+  previously-committed cloud credentials file and a `.env` with a database
+  connection string. They have been removed from the working tree and a
+  `.gitignore` now prevents recurrence, but they remain reachable in the git
+  history on GitHub pending a decision on rewriting it.
