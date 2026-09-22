@@ -21,6 +21,7 @@ export default function Header() {
     { name: 'Shop', path: '/shop' },
     { name: 'Sets', path: '/sets' },
     { name: 'Card Database', path: '/cards' },
+    { name: 'Architecture', path: '/architecture' },
   ];
 
   const handleSearch = (e) => {

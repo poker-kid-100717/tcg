@@ -14,6 +14,7 @@ import RegisterPage from './pages/RegisterPage';
 import CheckoutPage from './pages/CheckoutPage';
 import OrdersPage from './pages/OrdersPage';
 import WishlistPage from './pages/WishlistPage';
+import ArchitecturePage from './pages/ArchitecturePage';
 
 function App() {
   return (
@@ -36,6 +37,7 @@ function App() {
             <Route path="/checkout" element={<CheckoutPage />} />
             <Route path="/orders" element={<OrdersPage />} />
             <Route path="/wishlist" element={<WishlistPage />} />
+            <Route path="/architecture" element={<ArchitecturePage />} />
 
             {/* Placeholder routes */}
             <Route path="/account" element={<div className="container-custom py-12"><h1 className="text-3xl font-bold">Account Page</h1><p className="mt-4">This is a placeholder for the account page.</p></div>} />
