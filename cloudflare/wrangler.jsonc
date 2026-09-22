@@ -1,0 +1,42 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "pokemon-tcg-marketplace",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-01",
+
+  // The React build is served as static assets. Requests for /api/* run the
+  // Worker first, which forwards them to the ASP.NET Core container; every
+  // other unknown path falls back to index.html so React Router can handle it.
+  "assets": {
+    "directory": "../frontend/build",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+
+  // The .NET 10 API, built from backend/Dockerfile on `wrangler deploy`.
+  "containers": [
+    {
+      "class_name": "ApiContainer",
+      "image": "../backend/Dockerfile",
+      "instance_type": "basic",
+      "max_instances": 1
+    }
+  ],
+  "durable_objects": {
+    "bindings": [{ "name": "API", "class_name": "ApiContainer" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["ApiContainer"] }],
+
+  "vars": {
+    // Same-origin in production, so CORS can stay closed. Add origins here
+    // (comma-separated) only if another site needs to call the API.
+    "CORS_ALLOWED_ORIGINS": ""
+  },
+
+  // Secrets (set with `npx wrangler secret put <NAME>`, never committed):
+  //   DATABASE_URL  - Npgsql connection string for the Postgres database
+  //   JWT_KEY       - long random string used to sign JWTs
+
+  "observability": { "enabled": true }
+}

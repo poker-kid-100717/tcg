@@ -10,13 +10,34 @@ jobs:
   backend:
     name: Backend (.NET)
     runs-on: ubuntu-latest
+
+    # Real PostgreSQL so the EF Core migrations are applied end to end, not
+    # just compiled.
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: pokemontcg
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d pokemontcg"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    env:
+      ConnectionStrings__DefaultConnection: Host=localhost;Port=5432;Database=pokemontcg;Username=postgres;Password=postgres
+
     steps:
       - uses: actions/checkout@v4
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '8.0.x'
+          dotnet-version: '10.0.x'
 
       - name: Restore
         run: dotnet restore PokemonTcgMarketplace.sln
@@ -26,6 +47,32 @@ jobs:
 
       - name: Test
         run: dotnet test PokemonTcgMarketplace.sln --no-build --configuration Release --verbosity normal
+
+      - name: Check migrations match the model
+        run: |
+          dotnet tool install --global dotnet-ef --version '10.*'
+          dotnet ef migrations has-pending-model-changes --project backend --no-build --configuration Release
+
+      - name: Smoke test against PostgreSQL
+        env:
+          ASPNETCORE_ENVIRONMENT: Production
+          ASPNETCORE_URLS: http://localhost:8080
+          JwtSettings__Key: ci-only-signing-key-that-is-long-enough-for-hs256
+        run: |
+          dotnet backend/bin/Release/net10.0/pokemon-tcg-api.dll > api.log 2>&1 &
+          for i in $(seq 1 30); do
+            curl -fsS http://localhost:8080/api/data/health && break
+            sleep 2
+          done
+          # Startup applies migrations and seeds the demo users - log in as one.
+          curl -fsS -X POST http://localhost:8080/api/auth/login \
+            -H 'Content-Type: application/json' \
+            -d '{"email":"ash@pokemon.com","password":"pikachu123"}' | grep -q token \
+            || { echo "Login against Postgres failed"; cat api.log; exit 1; }
+
+      - name: API log
+        if: failure()
+        run: cat api.log || true
 
   frontend:
     name: Frontend (React)
@@ -55,3 +102,22 @@ jobs:
         run: npm run build
         env:
           CI: true
+
+  worker:
+    name: Cloudflare Worker (typecheck)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cloudflare
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: cloudflare/package-lock.json
+
+      - run: npm ci
+      - run: npm run typecheck

@@ -2,15 +2,20 @@ import React from 'react';
 
 const layers = [
   { name: 'React frontend', note: 'Pages, components, services (Tailwind CSS) — public card data fetched straight from the Pokémon TCG API' },
-  { name: 'ASP.NET Core 8 API', note: 'Auth, Cards, Sets, Data, Orders, Wishlist controllers — JWT-authenticated, per-user authorization' },
-  { name: 'SQLite + EF Core', note: 'Real, migrated, ACID-compliant persistence — zero external infrastructure to run' }
+  { name: 'ASP.NET Core 10 API', note: 'Auth, Cards, Sets, Data, Orders, Wishlist controllers — JWT-authenticated, per-user authorization, running in a Cloudflare Container' },
+  { name: 'PostgreSQL + EF Core', note: 'Npgsql provider with real EF Core migrations — Docker Compose locally, managed Postgres in production' }
 ];
 
 const decisions = [
   {
-    choice: 'SQLite with real EF Core migrations',
-    instead: 'the original EF Core InMemoryDatabase provider',
-    why: "The scaffold this was rebuilt from wiped every registration, order, and wishlist on every process restart — InMemory throws its data away by design. SQLite is a real relational database that needs zero external infrastructure: dotnet run creates and migrates a single pokemontcg.db file next to the project, so anyone cloning the repo can run it immediately with nothing to install or provision. The schema is managed by the same EF Core migrations you'd use against SQL Server or Postgres in a larger deployment — swapping the provider later is a one-line change in Program.cs, not a rewrite."
+    choice: 'PostgreSQL with real EF Core migrations',
+    instead: 'the original EF Core InMemoryDatabase provider (and, later, a local SQLite file)',
+    why: "The scaffold this was rebuilt from wiped every registration, order, and wishlist on every process restart — InMemory throws its data away by design. A SQLite file fixed that locally, but a container's disk is ephemeral, so in production it would lose data on every restart or redeploy. PostgreSQL (via Npgsql) is a real server database that lives outside the app: docker compose up gives you one locally, and production points at a managed Postgres through a single connection-string secret. The schema is still managed by EF Core migrations, applied automatically on startup."
+  },
+  {
+    choice: 'Cloudflare Worker + Container, served from one origin',
+    instead: 'hosting the React app and the API on separate domains',
+    why: "The Worker serves the React build as static assets from Cloudflare's edge and forwards only /api/* to the ASP.NET Core API, which runs as a Docker container on Cloudflare Containers. Because the browser only ever talks to one origin, there's no CORS surface in production and no API URL to configure — the frontend just calls /api. The container sleeps when idle and starts on the next request, so the demo costs almost nothing to keep online."
   },
   {
     choice: 'The frontend calls the public Pokémon TCG API directly for card and set data',
@@ -31,7 +36,7 @@ export default function ArchitecturePage() {
       <h1 className="mb-4">Architecture &amp; the reasoning behind it</h1>
       <p className="text-gray-600 mb-10 max-w-2xl">
         This app was rebuilt from a duplicated, disconnected AI-generated scaffold into one real
-        ASP.NET Core 8 backend and one React frontend. Below is the shape it ended up in, and the
+        ASP.NET Core 10 backend and one React frontend. Below is the shape it ended up in, and the
         specific tradeoffs behind the choices that mattered &mdash; not just what pattern was used, but
         what it replaced and why.
       </p>

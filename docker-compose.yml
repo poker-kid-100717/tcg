@@ -1,0 +1,25 @@
+# Local PostgreSQL for development. Matches the connection string in
+# backend/appsettings.Development.json.
+#
+#   docker compose up -d        # start Postgres on localhost:5432
+#   docker compose down         # stop it (data is kept in the pgdata volume)
+#   docker compose down -v      # stop it and delete the data
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: pokemontcg
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d pokemontcg"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:
