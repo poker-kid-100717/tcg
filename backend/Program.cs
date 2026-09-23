@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using PokemonTCG.API.Data;
@@ -12,24 +13,48 @@ builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 builder.Services.AddMemoryCache();
+builder.Services.AddHealthChecks();
 
-// Add CORS
+// In production the API runs in a Cloudflare Container behind a Worker, which
+// terminates TLS and forwards plain HTTP with X-Forwarded-Proto/For set. The
+// container is only reachable through that Worker, so trust those headers.
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    options.KnownIPNetworks.Clear();
+    options.KnownProxies.Clear();
+});
+
+// CORS: in production the frontend and API share one origin through the
+// Worker, so no cross-origin access is needed. Development allows any
+// origin so the CRA dev server (port 3000) can reach the API (port 5259).
+var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [];
 builder.Services.AddCors(options =>
 {
-    options.AddPolicy("AllowAll", builder =>
+    options.AddDefaultPolicy(policy =>
     {
-        builder.AllowAnyOrigin()
-               .AllowAnyMethod()
-               .AllowAnyHeader();
+        if (builder.Environment.IsDevelopment())
+            policy.AllowAnyOrigin();
+        else
+            policy.WithOrigins(allowedOrigins);
+
+        policy.AllowAnyMethod().AllowAnyHeader();
     });
 });
 
-// Add DbContext - SQLite file database so data survives restarts with zero
-// external infrastructure (no Docker/SQL Server required to run this project).
-var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
-    ?? "Data Source=pokemontcg.db";
+// PostgreSQL via EF Core. Accepts either an Npgsql key/value string or a
+// postgres:// URL (the format Neon and most hosts hand out). Development
+// defaults to the local instance from docker-compose.yml; anywhere else a
+// connection string is required, so a misconfigured deploy fails fast.
+var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
+if (string.IsNullOrWhiteSpace(connectionString))
+{
+    throw new InvalidOperationException(
+        "ConnectionStrings:DefaultConnection is not configured. Set it via the " +
+        "ConnectionStrings__DefaultConnection environment variable.");
+}
 builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseSqlite(connectionString));
+    options.UseNpgsql(PostgresConnectionString.Normalize(connectionString)));
 
 // Add services
 builder.Services.AddHttpClient<PokemonTcgService>(client =>
@@ -109,14 +134,17 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
-app.UseHttpsRedirection();
-app.UseStaticFiles();
+// No UseHttpsRedirection: Cloudflare only serves the site over HTTPS and
+// reaches the container over its private network, so there is no plain-HTTP
+// public entry point to redirect.
+app.UseForwardedHeaders();
 
-app.UseCors("AllowAll");
+app.UseCors();
 
 app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
+app.MapHealthChecks("/health");
 
 app.Run();

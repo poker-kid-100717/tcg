@@ -31,3 +31,6 @@ gha-creds-*.json
 .vscode/
 .idea/
 .DS_Store
+
+# ---- Cloudflare Worker ----
+.wrangler/
