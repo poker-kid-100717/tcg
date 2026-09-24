@@ -1,0 +1,91 @@
+name: deploy-cloudflare
+
+# Deploys the React app + ASP.NET Core API container to Cloudflare as one
+# Worker at https://tcg.portfolio-joshdavis.app.
+#
+# Required repository secrets:
+#   CLOUDFLARE_API_TOKEN   token with Workers Scripts/Containers edit + DNS for the zone
+#   CLOUDFLARE_ACCOUNT_ID
+#   DATABASE_URL           Npgsql connection string for the managed Postgres
+#   JWT_SIGNING_KEY        >= 32-byte random string
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tcg-cloudflare-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      SITE: https://tcg.portfolio-joshdavis.app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Backend tests (gate the deploy)
+        run: dotnet test PokemonTcgMarketplace.sln --configuration Release
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: |
+            frontend/package-lock.json
+            cloudflare/package-lock.json
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          CI=true npm test -- --watchAll=false
+          CI=true npm run build
+
+      - name: Install Worker dependencies
+        working-directory: cloudflare
+        run: |
+          npm ci
+          npm run typecheck
+
+      # Builds backend/Dockerfile, pushes it to Cloudflare's registry, rolls out
+      # the container and uploads the Worker + static assets in one step.
+      - name: Deploy to Cloudflare
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: cloudflare
+          packageManager: npm
+          command: deploy
+          secrets: |
+            DATABASE_URL
+            JWT_SIGNING_KEY
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          JWT_SIGNING_KEY: ${{ secrets.JWT_SIGNING_KEY }}
+
+      # The first request after a deploy cold-starts the .NET container and
+      # runs pending migrations, so allow it a couple of minutes.
+      - name: Smoke test production
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 24); do
+            if curl --fail --silent --max-time 20 "$SITE/healthz" | grep -q Healthy; then
+              echo "API healthy after $attempt attempt(s)"; break
+            fi
+            [ "$attempt" = 24 ] && { echo "API never became healthy"; exit 1; }
+            sleep 5
+          done
+          curl --fail --silent "$SITE/" | grep -q '<div id="root">'
+          curl --fail --silent -o /dev/null "$SITE/api/docs/v1/swagger.json"

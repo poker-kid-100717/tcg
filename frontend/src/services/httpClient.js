@@ -1,7 +1,12 @@
 import axios from 'axios';
 
-// Base URL of the ASP.NET Core backend (see backend/Properties/launchSettings.json).
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5259/api';
+// Base URL of the ASP.NET Core backend. In production the Cloudflare Worker
+// serves this app and proxies /api/* to the API container on the same origin,
+// so a relative path is all that's needed. Locally it falls back to the port in
+// backend/Properties/launchSettings.json (and docker-compose.yml).
+const API_BASE_URL =
+  process.env.REACT_APP_API_URL ||
+  (process.env.NODE_ENV === 'production' ? '/api' : 'http://localhost:5259/api');
 
 const TOKEN_STORAGE_KEY = 'pokemonTCGToken';
 

@@ -12,6 +12,8 @@ builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 builder.Services.AddMemoryCache();
+builder.Services.AddHealthChecks()
+    .AddDbContextCheck<AppDbContext>("database");
 
 // Add CORS
 builder.Services.AddCors(options =>
@@ -24,12 +26,18 @@ builder.Services.AddCors(options =>
     });
 });
 
-// Add DbContext - SQLite file database so data survives restarts with zero
-// external infrastructure (no Docker/SQL Server required to run this project).
-var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
-    ?? "Data Source=pokemontcg.db";
+// Add DbContext - PostgreSQL via Npgsql. Locally this is the postgres service
+// in docker-compose.yml; in production it is a managed Postgres (e.g. Neon)
+// whose connection string arrives as ConnectionStrings__DefaultConnection.
+var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
+if (string.IsNullOrWhiteSpace(connectionString))
+{
+    throw new InvalidOperationException(
+        "ConnectionStrings:DefaultConnection is not configured. Set it via the " +
+        "ConnectionStrings__DefaultConnection environment variable.");
+}
 builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseSqlite(connectionString));
+    options.UseNpgsql(connectionString, npgsql => npgsql.EnableRetryOnFailure()));
 
 // Add services
 builder.Services.AddHttpClient<PokemonTcgService>(client =>
@@ -102,15 +110,24 @@ using (var scope = app.Services.CreateScope())
     }
 }
 
-// Configure the HTTP request pipeline
+// Configure the HTTP request pipeline.
+// Swagger stays on in every environment - this is a public portfolio API, so
+// the interactive docs are part of what's being shown. They live under /api
+// so the Cloudflare Worker's /api/* route reaches them in production.
+app.UseSwagger(c => c.RouteTemplate = "api/docs/{documentName}/swagger.json");
+app.UseSwaggerUI(c =>
+{
+    c.RoutePrefix = "api/docs";
+    c.SwaggerEndpoint("/api/docs/v1/swagger.json", "Pokémon TCG Marketplace API v1");
+});
+
+// In production TLS terminates at Cloudflare's edge and the Worker is the only
+// ingress to this container, so an HTTPS redirect here would have no port to
+// redirect to.
 if (app.Environment.IsDevelopment())
 {
-    app.UseSwagger();
-    app.UseSwaggerUI();
+    app.UseHttpsRedirection();
 }
-
-app.UseHttpsRedirection();
-app.UseStaticFiles();
 
 app.UseCors("AllowAll");
 
@@ -118,5 +135,6 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
+app.MapHealthChecks("/healthz");
 
 app.Run();

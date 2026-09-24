@@ -1,0 +1,37 @@
+# Local full stack: PostgreSQL + the API container (same image Cloudflare runs).
+#   docker compose up -d --build
+#   API:     http://localhost:5259/api/docs
+#   Health:  http://localhost:5259/healthz
+# Run the React app separately with `npm start` in frontend/ (it targets
+# http://localhost:5259/api by default).
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: pokemontcg
+      POSTGRES_USER: tcg
+      POSTGRES_PASSWORD: tcg_dev_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tcg -d pokemontcg"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build: ./backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ConnectionStrings__DefaultConnection: "Host=postgres;Port=5432;Database=pokemontcg;Username=tcg;Password=tcg_dev_password"
+      # Local-only key; production reads JWT_SIGNING_KEY from a Worker secret.
+      JwtSettings__Key: "local-compose-signing-key-not-for-production-0123456789"
+    ports:
+      - "5259:8080"
+
+volumes:
+  pgdata:
