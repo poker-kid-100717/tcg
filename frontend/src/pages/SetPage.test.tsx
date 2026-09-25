@@ -1,0 +1,72 @@
+import { screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+
+import type { CardSummary, SetDetail } from '../api/types';
+import { mockApi, renderRoute } from '../test-utils';
+import SetPage from './SetPage';
+
+const card = (number: string, name: string, rarity: string, marketPrice: number | null): CardSummary => ({
+  id: `sv3pt5-${number}`,
+  name,
+  number,
+  rarity,
+  imageUrl: null,
+  setId: 'sv3pt5',
+  setName: '151',
+  marketPrice,
+  priceVariant: marketPrice === null ? null : 'holofoil',
+  tcgplayerUrl: null,
+});
+
+const detail: SetDetail = {
+  set: { id: 'sv3pt5', name: '151', series: 'Scarlet & Violet', releaseDate: '2023-09-22', printedTotal: 165, total: 207, logoUrl: null, symbolUrl: null },
+  stats: { cardCount: 4, pricedCount: 3, totalMarketValue: 1234.5, mostValuable: card('199', 'Charizard ex', 'Special Illustration Rare', 1100) },
+  cards: [
+    card('2', 'Ivysaur', 'Uncommon', 0.25),
+    card('10', 'Metapod', 'Common', null),
+    card('199', 'Charizard ex', 'Special Illustration Rare', 1100),
+    card('1', 'Bulbasaur', 'Common', 134.25),
+  ],
+};
+
+const names = () => within(screen.getByRole('list')).getAllByRole('link').map((l) => l.querySelector('p')?.textContent);
+
+describe('SetPage', () => {
+  beforeEach(() => mockApi({ '/api/sets/sv3pt5': detail }));
+
+  it('shows set stats and lists cards by collector number', async () => {
+    renderRoute('/sets/sv3pt5', '/sets/:setId', <SetPage />);
+
+    expect(await screen.findByRole('heading', { name: '151', level: 1 })).toBeInTheDocument();
+    expect(screen.getByText('$1,235')).toBeInTheDocument(); // totals over $1,000 round to whole dollars
+    expect(screen.getByRole('link', { name: 'Charizard ex' })).toHaveAttribute('href', '/cards/sv3pt5-199');
+    expect(screen.getByText(/165 cards \+ 42 secret/)).toBeInTheDocument();
+    expect(names()).toEqual(['Bulbasaur', 'Ivysaur', 'Metapod', 'Charizard ex']);
+  });
+
+  it('sorts by price with unpriced cards last, and filters by rarity', async () => {
+    const user = userEvent.setup();
+    renderRoute('/sets/sv3pt5', '/sets/:setId', <SetPage />);
+    await screen.findByRole('heading', { name: '151', level: 1 });
+
+    await user.selectOptions(screen.getByLabelText('Sort by'), 'price-desc');
+    expect(names()).toEqual(['Charizard ex', 'Bulbasaur', 'Ivysaur', 'Metapod']);
+
+    await user.selectOptions(screen.getByLabelText('Rarity'), 'Common');
+    expect(names()).toEqual(['Bulbasaur', 'Metapod']);
+    expect(screen.getByText('2 of 4 cards')).toBeInTheDocument();
+  });
+
+  it('finds a card by name or exact number', async () => {
+    const user = userEvent.setup();
+    renderRoute('/sets/sv3pt5', '/sets/:setId', <SetPage />);
+    await screen.findByRole('heading', { name: '151', level: 1 });
+
+    await user.type(screen.getByLabelText('Find in set'), 'saur');
+    expect(names()).toEqual(['Bulbasaur', 'Ivysaur']);
+
+    await user.clear(screen.getByLabelText('Find in set'));
+    await user.type(screen.getByLabelText('Find in set'), '199');
+    expect(names()).toEqual(['Charizard ex']);
+  });
+});

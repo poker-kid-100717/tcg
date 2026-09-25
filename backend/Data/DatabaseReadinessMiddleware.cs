@@ -29,7 +29,7 @@ namespace PokemonTCG.API.Data
 
         public async Task InvokeAsync(HttpContext context)
         {
-            if (!_status.Succeeded && context.Request.Path.StartsWithSegments("/api"))
+            if (!_status.Succeeded && (context.Request.Path.StartsWithSegments("/api") || context.Request.Path.StartsWithSegments("/internal")))
             {
                 await Task.WhenAny(_status.WhenSucceeded, Task.Delay(_maxWait, context.RequestAborted));
                 if (!_status.Succeeded)

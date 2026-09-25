@@ -45,10 +45,8 @@ jobs:
           command: deploy
           secrets: |
             TCG_DATABASE_URL
-            TCG_JWT_KEY
         env:
           TCG_DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          TCG_JWT_KEY: ${{ secrets.JWT_KEY }}
 
       - name: Verify production site and API
         shell: bash
@@ -59,8 +57,6 @@ jobs:
           curl --fail --silent --show-error --retry 12 --retry-delay 10 --retry-all-errors "$SITE/health" | grep -q Healthy
           curl --fail --silent --show-error "$SITE/sets" | grep -q '<div id="root">'
 
-          code="$(curl --silent --show-error -o /dev/null -w '%{http_code}' "$SITE/api/orders")"
-          test "$code" = 401 || {
-            echo "expected 401 from unauthenticated /api/orders, got $code"
-            exit 1
-          }
+          # The price guide API answers with the set list from the card database.
+          curl --fail --silent --show-error --retry 3 --retry-delay 10 "$SITE/api/sets" | grep -q '"releaseDate"'
+          curl --fail --silent --show-error "$SITE/api/market/status" | grep -q '"daysOfHistory"'

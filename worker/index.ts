@@ -5,13 +5,14 @@ export interface Env {
   API: DurableObjectNamespace<TcgApi>;
   // GitHub Actions uploads these as Worker secrets during deploy.
   TCG_DATABASE_URL: string;
-  TCG_JWT_KEY: string;
+  /** Optional: raises the Pokémon TCG API's rate limit. */
+  TCG_POKEMONTCG_API_KEY?: string;
 }
 
 /**
- * The ASP.NET Core API, running as a Cloudflare Container. It sleeps after
- * 10 minutes without traffic and is started again on the next request.
- * State lives in Postgres, so the container itself is disposable.
+ * The ASP.NET Core price-guide API, running as a Cloudflare Container. It
+ * sleeps after 10 minutes without traffic and is started again on the next
+ * request. State lives in Postgres, so the container itself is disposable.
  */
 export class TcgApi extends Container<Env> {
   defaultPort = 8080;
@@ -25,13 +26,16 @@ export class TcgApi extends Container<Env> {
     this.envVars = {
       ASPNETCORE_ENVIRONMENT: "Production",
       ConnectionStrings__DefaultConnection: env.TCG_DATABASE_URL,
-      JwtSettings__Key: env.TCG_JWT_KEY,
+      ...(env.TCG_POKEMONTCG_API_KEY ? { PokemonTcgApi__ApiKey: env.TCG_POKEMONTCG_API_KEY } : {}),
     };
   }
 }
 
-const isApiPath = (pathname: string) =>
+/** Paths the public may reach on the API. /internal/* (the snapshot job) is deliberately absent. */
+export const isApiPath = (pathname: string) =>
   pathname.startsWith("/api/") || pathname === "/health" || pathname.startsWith("/health/");
+
+const api = (env: Env) => env.API.getByName("api");
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -49,6 +53,24 @@ export default {
 
     // One instance: the API caches card data in memory, and a single
     // container is plenty for a portfolio workload.
-    return env.API.getByName("api").fetch(new Request(request, { headers }));
+    return api(env).fetch(new Request(request, { headers }));
+  },
+
+  /**
+   * Cron Trigger (see wrangler.jsonc): once a day, wake the container and have
+   * it record the day's TCGplayer prices. The container would sleep through an
+   * in-process timer, so the schedule lives here instead.
+   */
+  async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil(
+      (async () => {
+        const response = await api(env).fetch(new Request("http://tcg-api/internal/snapshots", { method: "POST" }));
+        const body = await response.text();
+        if (!response.ok && response.status !== 409) {
+          throw new Error(`Price snapshot failed: ${response.status} ${body}`);
+        }
+        console.log(`Price snapshot: ${response.status} ${body}`);
+      })(),
+    );
   },
 } satisfies ExportedHandler<Env>;
