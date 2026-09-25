@@ -44,11 +44,11 @@ jobs:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: deploy
           secrets: |
-            DATABASE_URL
-            JWT_KEY
+            TCG_DATABASE_URL
+            TCG_JWT_KEY
         env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          JWT_KEY: ${{ secrets.JWT_KEY }}
+          TCG_DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          TCG_JWT_KEY: ${{ secrets.JWT_KEY }}
 
       - name: Verify production site and API
         shell: bash
