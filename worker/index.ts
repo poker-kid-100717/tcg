@@ -3,9 +3,9 @@ import { Container } from "@cloudflare/containers";
 export interface Env {
   ASSETS: Fetcher;
   API: DurableObjectNamespace<TcgApi>;
-  // Set as Worker secrets (see README "Deployment").
-  DATABASE_URL: string;
-  JWT_KEY: string;
+  // GitHub Actions uploads these as Worker secrets during deploy.
+  TCG_DATABASE_URL: string;
+  TCG_JWT_KEY: string;
 }
 
 /**
@@ -24,8 +24,8 @@ export class TcgApi extends Container<Env> {
     super(ctx, env);
     this.envVars = {
       ASPNETCORE_ENVIRONMENT: "Production",
-      ConnectionStrings__DefaultConnection: env.DATABASE_URL,
-      JwtSettings__Key: env.JWT_KEY,
+      ConnectionStrings__DefaultConnection: env.TCG_DATABASE_URL,
+      JwtSettings__Key: env.TCG_JWT_KEY,
     };
   }
 }
