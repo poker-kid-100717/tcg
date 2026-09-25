@@ -25,7 +25,7 @@ function createEnv() {
 }
 
 describe("worker routing", () => {
-  it.each(["/api/auth/login", "/api/orders", "/health"])("sends %s to the API container", async (path) => {
+  it.each(["/api/auth/login", "/api/orders", "/health", "/health/live"])("sends %s to the API container", async (path) => {
     const { env, apiRequests } = createEnv();
 
     await worker.fetch(new Request(`https://tcg.example.com${path}`, { method: "POST" }), env);

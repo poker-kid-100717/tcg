@@ -16,7 +16,8 @@ export interface Env {
 export class TcgApi extends Container<Env> {
   defaultPort = 8080;
   sleepAfter = "10m";
-  pingEndpoint = "localhost/health";
+  // Liveness only: a slow database should not stop the container starting.
+  pingEndpoint = "localhost/health/live";
 
   constructor(ctx: DurableObjectState<{}>, env: Env) {
     super(ctx, env);
@@ -28,7 +29,8 @@ export class TcgApi extends Container<Env> {
   }
 }
 
-const isApiPath = (pathname: string) => pathname.startsWith("/api/") || pathname === "/health";
+const isApiPath = (pathname: string) =>
+  pathname.startsWith("/api/") || pathname === "/health" || pathname.startsWith("/health/");
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {

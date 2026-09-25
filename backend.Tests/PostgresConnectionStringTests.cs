@@ -46,6 +46,19 @@ namespace PokemonTcgMarketplace.Backend.Tests
             Assert.Equal("app_user", result.Username);
             Assert.Equal("p@ss:word", result.Password);
             Assert.Equal(SslMode.Require, result.SslMode);
+            Assert.Equal(ChannelBinding.Require, result.ChannelBinding);
+        }
+
+        [Theory]
+        [InlineData("verify-full", SslMode.VerifyFull)]
+        [InlineData("verify-ca", SslMode.VerifyCA)]
+        [InlineData("disable", SslMode.Disable)]
+        public void Normalize_AcceptsLibpqSslModeSpelling(string sslMode, SslMode expected)
+        {
+            var result = new NpgsqlConnectionStringBuilder(PostgresConnectionString.Normalize(
+                $"postgres://u:p@db.example.com/app?sslmode={sslMode}"));
+
+            Assert.Equal(expected, result.SslMode);
         }
 
         [Fact]

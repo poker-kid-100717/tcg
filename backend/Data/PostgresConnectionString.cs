@@ -52,11 +52,15 @@ namespace PokemonTCG.API.Data
 
                 switch (key.ToLowerInvariant())
                 {
+                    // libpq spells modes with hyphens (verify-full); Npgsql's
+                    // enums don't (VerifyFull).
                     case "sslmode":
-                        builder.SslMode = Enum.Parse<SslMode>(value, ignoreCase: true);
+                        builder.SslMode = Enum.Parse<SslMode>(value.Replace("-", ""), ignoreCase: true);
                         break;
-                    // libpq-only options Npgsql doesn't support (e.g. Neon's
-                    // channel_binding) are dropped rather than failing startup.
+                    case "channel_binding":
+                        builder.ChannelBinding = Enum.Parse<ChannelBinding>(value, ignoreCase: true);
+                        break;
+                    // Other libpq-only options are ignored rather than failing startup.
                     default:
                         break;
                 }
