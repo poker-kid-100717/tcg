@@ -37,7 +37,7 @@ namespace PokemonTcgMarketplace.Backend.Tests
             var card = new JsonObject
             {
                 ["id"] = id, ["name"] = name, ["supertype"] = "Pokémon", ["subtypes"] = new JsonArray("Basic"), ["hp"] = "70",
-                ["types"] = new JsonArray("Fire"), ["set"] = set.DeepClone(), ["number"] = number, ["artist"] = "Test Artist",
+                ["types"] = new JsonArray("Fire"), ["nationalPokedexNumbers"] = new JsonArray(6), ["set"] = set.DeepClone(), ["number"] = number, ["artist"] = "Test Artist",
                 ["rarity"] = rarity,
                 ["images"] = new JsonObject { ["small"] = $"https://images.test/{id}.png", ["large"] = $"https://images.test/{id}_hires.png" },
             };

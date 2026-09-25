@@ -42,3 +42,21 @@ export const useDownTrend = () =>
 
 export const useSleepers = () =>
   useQuery({ queryKey: ['sleepers'], queryFn: ({ signal }) => api.sleepers(signal), staleTime: minutes(30) });
+
+export const usePredictions = (direction: 'up' | 'down') =>
+  useQuery({
+    queryKey: ['predictions', direction],
+    queryFn: ({ signal }) => api.predictions(direction, signal),
+    staleTime: minutes(30),
+  });
+
+export const useCardPredictions = (cardId: string) =>
+  useQuery({
+    queryKey: ['card-predictions', cardId],
+    queryFn: ({ signal }) => api.cardPredictions(cardId, signal),
+    staleTime: minutes(30),
+    enabled: cardId.length > 0,
+  });
+
+export const useModelSummary = () =>
+  useQuery({ queryKey: ['model'], queryFn: ({ signal }) => api.model(signal), staleTime: minutes(30) });

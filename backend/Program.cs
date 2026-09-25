@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Http.Resilience;
 using PokemonTCG.API.Data;
 using PokemonTCG.API.Pricing;
+using PokemonTCG.API.Pricing.Predictions;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -68,6 +69,8 @@ builder.Services.AddHybridCache();
 builder.Services.AddSingleton(builder.Configuration.GetSection(SnapshotOptions.SectionName).Get<SnapshotOptions>() ?? new());
 builder.Services.AddScoped<PriceSnapshotService>();
 builder.Services.AddScoped<PriceGuideService>();
+builder.Services.AddSingleton(builder.Configuration.GetSection(PredictionOptions.SectionName).Get<PredictionOptions>() ?? new());
+builder.Services.AddScoped<PredictionService>();
 
 var app = builder.Build();
 
@@ -87,6 +90,7 @@ app.UseForwardedHeaders();
 app.UseMiddleware<DatabaseReadinessMiddleware>();
 
 app.MapPriceGuide();
+app.MapPredictions();
 app.MapHealthChecks("/health");
 app.MapHealthChecks("/health/live", new HealthCheckOptions { Predicate = _ => false });
 

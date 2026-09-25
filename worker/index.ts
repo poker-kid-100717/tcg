@@ -37,6 +37,9 @@ export const isApiPath = (pathname: string) =>
 
 const api = (env: Env) => env.API.getByName("api");
 
+/** Must match the second entry in wrangler.jsonc triggers.crons. */
+export const PREDICTIONS_CRON = "45 11 * * *";
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
@@ -61,15 +64,18 @@ export default {
    * it record the day's TCGplayer prices. The container would sleep through an
    * in-process timer, so the schedule lives here instead.
    */
-  async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+  // Two daily Cron Triggers: record prices, then (half an hour later, once that's done) retrain the price
+  // model and refresh predictions. Both wake the container; neither is reachable from the internet.
+  async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    const job = controller.cron === PREDICTIONS_CRON ? "predictions" : "snapshots";
     ctx.waitUntil(
       (async () => {
-        const response = await api(env).fetch(new Request("http://tcg-api/internal/snapshots", { method: "POST" }));
+        const response = await api(env).fetch(new Request(`http://tcg-api/internal/${job}`, { method: "POST" }));
         const body = await response.text();
         if (!response.ok && response.status !== 409) {
-          throw new Error(`Price snapshot failed: ${response.status} ${body}`);
+          throw new Error(`Scheduled ${job} failed: ${response.status} ${body}`);
         }
-        console.log(`Price snapshot: ${response.status} ${body}`);
+        console.log(`Scheduled ${job}: ${response.status} ${body}`);
       })(),
     );
   },

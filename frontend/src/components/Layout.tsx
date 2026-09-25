@@ -59,6 +59,9 @@ export function Layout() {
             <NavLink to="/market" className={navClass}>
               Market
             </NavLink>
+            <NavLink to="/outlook" className={navClass}>
+              Outlook
+            </NavLink>
             <NavLink to="/about" className={navClass}>
               How it works
             </NavLink>

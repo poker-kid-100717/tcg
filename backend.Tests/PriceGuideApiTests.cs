@@ -109,7 +109,16 @@ namespace PokemonTcgMarketplace.Backend.Tests
                 var rows = await db.PriceSnapshots.Where(s => s.CardId.StartsWith("mkt1-")).ToListAsync();
                 Assert.Equal(8, rows.Count); // 4 printings over the minimum × 2 days; bulk commons skipped
                 Assert.DoesNotContain(rows, r => r.CardId == "mkt1-3");
-                Assert.Equal("Riser", (await db.Cards.SingleAsync(c => c.Id == "mkt1-1")).Name);
+                var stored = await db.Cards.SingleAsync(c => c.Id == "mkt1-1");
+                Assert.Equal("Riser", stored.Name);
+                // The attributes the price model learns from are stored with the card.
+                Assert.Equal(6, stored.NationalDex);
+                Assert.Equal("Pokémon", stored.Supertype);
+                Assert.Equal(["Basic"], stored.Subtypes);
+                Assert.Equal("Test Artist", stored.Artist);
+                Assert.Equal("Test Series", stored.SetSeries);
+                Assert.Equal(new DateOnly(2022, 5, 1), stored.SetReleased);
+                Assert.Equal(4, stored.SetPrintedTotal);
             }
 
             var card = await Get<CardDetail>("/api/cards/mkt1-1");

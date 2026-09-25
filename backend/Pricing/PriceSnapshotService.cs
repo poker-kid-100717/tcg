@@ -108,12 +108,21 @@ public class PriceSnapshotService(
 
         await db.Database.ExecuteSqlRawAsync(
             """
-            INSERT INTO cards (id, name, number, set_id, set_name, rarity, image_small, tcgplayer_url)
-            SELECT * FROM unnest(@ids, @names, @numbers, @set_ids, @set_names, @rarities, @images, @urls)
+            INSERT INTO cards (id, name, number, set_id, set_name, rarity, image_small, tcgplayer_url,
+                               supertype, subtypes, national_dex, artist, set_series, set_released, set_printed_total)
+            SELECT id, name, number, set_id, set_name, rarity, image_small, tcgplayer_url,
+                   supertype, string_to_array(subtypes, '|'), national_dex, artist, set_series, set_released, set_printed_total
+            FROM unnest(@ids, @names, @numbers, @set_ids, @set_names, @rarities, @images, @urls,
+                        @supertypes, @subtypes, @dex, @artists, @series, @released, @printed)
+                AS t(id, name, number, set_id, set_name, rarity, image_small, tcgplayer_url,
+                     supertype, subtypes, national_dex, artist, set_series, set_released, set_printed_total)
             ON CONFLICT (id) DO UPDATE SET
                 name = excluded.name, number = excluded.number, set_id = excluded.set_id,
                 set_name = excluded.set_name, rarity = excluded.rarity,
-                image_small = excluded.image_small, tcgplayer_url = excluded.tcgplayer_url
+                image_small = excluded.image_small, tcgplayer_url = excluded.tcgplayer_url,
+                supertype = excluded.supertype, subtypes = excluded.subtypes, national_dex = excluded.national_dex,
+                artist = excluded.artist, set_series = excluded.set_series, set_released = excluded.set_released,
+                set_printed_total = excluded.set_printed_total
             """,
             [
                 Text("ids", tracked.Select(c => c.Id)),
@@ -124,6 +133,15 @@ public class PriceSnapshotService(
                 Text("rarities", tracked.Select(c => c.Rarity)),
                 Text("images", tracked.Select(c => c.Images?.Small)),
                 Text("urls", tracked.Select(c => c.Tcgplayer?.Url)),
+                Text("supertypes", tracked.Select(c => c.Supertype)),
+                // unnest can't take a jagged array, so subtypes travel as one delimited string per card.
+                Text("subtypes", tracked.Select(c => string.Join('|', c.Subtypes ?? []))),
+                new NpgsqlParameter("dex", NpgsqlDbType.Array | NpgsqlDbType.Integer)
+                    { Value = tracked.Select(c => c.NationalPokedexNumbers is [var first, ..] ? first : (int?)null).ToArray() },
+                Text("artists", tracked.Select(c => c.Artist)),
+                Text("series", tracked.Select(c => c.Set.Series)),
+                new NpgsqlParameter("released", NpgsqlDbType.Array | NpgsqlDbType.Date) { Value = tracked.Select(c => c.Set.Released).ToArray() },
+                new NpgsqlParameter("printed", NpgsqlDbType.Array | NpgsqlDbType.Integer) { Value = tracked.Select(c => (int?)c.Set.PrintedTotal).ToArray() },
             ],
             cancellationToken);
 

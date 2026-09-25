@@ -1,6 +1,7 @@
 import { Link, useParams } from 'react-router-dom';
 
-import { useCard } from '../api/hooks';
+import { useCard, useCardPredictions } from '../api/hooks';
+import { CardOutlook } from '../components/Predictions';
 import { PriceHistoryChart } from '../components/PriceHistoryChart';
 import { ShopLink } from '../components/ShopLink';
 import { ErrorState, Loading } from '../components/States';
@@ -9,6 +10,7 @@ import { formatDate, formatPrice } from '../lib/format';
 export default function CardPage() {
   const { cardId = '' } = useParams();
   const { data: card, isPending, error, refetch } = useCard(cardId);
+  const outlook = useCardPredictions(cardId);
 
   if (isPending) return <Loading label="Loading card…" />;
   if (error) return <ErrorState error={error} onRetry={() => refetch()} />;
@@ -107,6 +109,20 @@ export default function CardPage() {
             <h2 id="history-heading" className="text-lg">Price history</h2>
             <PriceHistoryChart history={card.history} />
           </section>
+
+          {outlook.data && (
+            <section aria-labelledby="outlook-heading" className="panel grid gap-3 p-5">
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <h2 id="outlook-heading" className="text-lg">
+                  {outlook.data.horizonDays || 30}-day outlook
+                </h2>
+                <Link to="/outlook" className="text-sm font-semibold text-pokemon-pokeblue hover:underline">
+                  How predictions work →
+                </Link>
+              </div>
+              <CardOutlook list={outlook.data} />
+            </section>
+          )}
 
           <section aria-labelledby="details-heading" className="panel p-5">
             <h2 id="details-heading" className="mb-3 text-lg">Card details</h2>

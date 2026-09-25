@@ -169,3 +169,67 @@ export interface Sleepers {
   asOf: string | null;
   cards: SleeperCard[];
 }
+
+export type PredictionStatus = 'Running' | 'Published' | 'Withheld' | 'InsufficientHistory' | 'Failed';
+
+export interface PredictionReason {
+  feature: string;
+  text: string;
+  effectPercent: number;
+}
+
+export interface CardPrediction {
+  cardId: string;
+  name: string;
+  number: string;
+  setId: string;
+  setName: string;
+  imageUrl: string | null;
+  tcgplayerUrl: string | null;
+  variant: string;
+  variantLabel: string;
+  current: number;
+  predicted: number;
+  low: number;
+  high: number;
+  changePercent: number;
+  reasons: PredictionReason[];
+}
+
+export interface PredictionList {
+  status: PredictionStatus;
+  asOf: string | null;
+  horizonDays: number;
+  cards: CardPrediction[];
+}
+
+export interface FeatureWeight {
+  feature: string;
+  label: string;
+  weight: number;
+}
+
+export interface RealizedAccuracy {
+  asOf: string;
+  count: number;
+  typicalErrorPercent: number;
+  noChangeErrorPercent: number;
+  directionAccuracyPercent: number | null;
+}
+
+export interface ModelSummary {
+  status: PredictionStatus;
+  asOf: string | null;
+  trainedAt: string | null;
+  horizonDays: number;
+  trainingRows: number;
+  validationRows: number;
+  typicalErrorPercent: number | null;
+  noChangeErrorPercent: number | null;
+  directionAccuracyPercent: number | null;
+  rangeLowPercent: number | null;
+  rangeHighPercent: number | null;
+  importance: FeatureWeight[];
+  trackRecord: RealizedAccuracy[];
+  message: string | null;
+}

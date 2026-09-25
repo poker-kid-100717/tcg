@@ -3,6 +3,8 @@ import type {
   DownTrend,
   MarketMovers,
   MarketStatus,
+  ModelSummary,
+  PredictionList,
   SearchResults,
   SetDetail,
   SetSummary,
@@ -53,4 +55,8 @@ export const api = {
   status: (signal?: AbortSignal) => get<MarketStatus>('/market/status', signal),
   downtrend: (signal?: AbortSignal) => get<DownTrend>('/market/downtrend?days=30&limit=12', signal),
   sleepers: (signal?: AbortSignal) => get<Sleepers>('/market/sleepers?limit=12', signal),
+  predictions: (direction: 'up' | 'down', signal?: AbortSignal) =>
+    get<PredictionList>(`/predictions?direction=${direction}&limit=12`, signal),
+  cardPredictions: (id: string, signal?: AbortSignal) => get<PredictionList>(`/cards/${enc(id)}/predictions`, signal),
+  model: (signal?: AbortSignal) => get<ModelSummary>('/predictions/model', signal),
 };

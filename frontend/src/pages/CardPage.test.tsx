@@ -64,6 +64,36 @@ describe('CardPage', () => {
     expect(screen.getByRole('link', { name: '151' })).toHaveAttribute('href', '/sets/sv3pt5');
   });
 
+  it('shows the 30-day outlook for each printing with the reasons behind it', async () => {
+    mockApi({
+      '/api/cards/sv3pt5-6': card,
+      '/api/cards/sv3pt5-6/predictions': {
+        status: 'Published',
+        asOf: '2026-09-24',
+        horizonDays: 30,
+        cards: [
+          {
+            cardId: 'sv3pt5-6', name: 'Charizard ex', number: '6', setId: 'sv3pt5', setName: '151', imageUrl: null,
+            tcgplayerUrl: null, variant: 'holofoil', variantLabel: 'Holofoil', current: 24.37, predicted: 21.9, low: 18.4,
+            high: 25.1, changePercent: -10.1,
+            reasons: [
+              { feature: 'change_30d', text: '-14% over the last 30 days', effectPercent: -6.2 },
+              { feature: 'pokemon_premium', text: 'Charizard cards sell for 4.8× the typical card', effectPercent: 2.1 },
+            ],
+          },
+        ],
+      },
+    });
+    renderRoute('/cards/sv3pt5-6', '/cards/:cardId', <CardPage />);
+
+    const outlook = await screen.findByRole('region', { name: '30-day outlook' });
+    expect(outlook).toHaveTextContent('$21.90');
+    expect(outlook).toHaveTextContent('-10.1% from $24.37');
+    expect(outlook).toHaveTextContent('Likely range $18.40 – $25.10');
+    expect(outlook).toHaveTextContent('-14% over the last 30 days-6.2%');
+    expect(outlook).toHaveTextContent('Charizard cards sell for 4.8× the typical card+2.1%');
+  });
+
   it('hides the Shop link when TCGplayer has no listing', async () => {
     mockApi({ '/api/cards/sv3pt5-6': { ...card, prices: [], tcgplayerUrl: null } });
     renderRoute('/cards/sv3pt5-6', '/cards/:cardId', <CardPage />);
