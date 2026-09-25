@@ -2,7 +2,7 @@ const layers = [
   { name: 'React + Vite', note: 'Set guide, card pages and search; TanStack Query caches API responses in the browser' },
   { name: 'Cloudflare Worker', note: 'Serves the site, forwards /api to the container, and runs the daily price snapshot on a Cron Trigger' },
   { name: 'ASP.NET Core 10 API', note: 'Cloudflare Container; proxies and caches the Pokémon TCG API and serves price history' },
-  { name: 'PostgreSQL (Neon)', note: 'Daily TCGplayer price snapshots per card and printing, for history and movers' },
+  { name: 'PostgreSQL (Neon)', note: 'Daily TCGplayer price snapshots per card and printing, for history, movers, trends and sleepers' },
 ];
 
 const decisions = [
@@ -35,7 +35,7 @@ export default function AboutPage() {
       <h1 className="mb-4 text-3xl sm:text-4xl">Where the prices come from</h1>
       <p className="mb-10 max-w-2xl text-slate-600">
         Card details and TCGplayer market prices come from the Pokémon TCG API. Once a day the app records every card&apos;s
-        prices, which is where the price history and the market movers come from. Everything runs on Cloudflare.
+        prices, which is where the price history and the movers, trends and sleepers come from. Everything runs on Cloudflare.
       </p>
 
       <ol className="mb-12 grid gap-3 md:grid-cols-4">

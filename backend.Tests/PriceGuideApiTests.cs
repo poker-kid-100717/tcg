@@ -134,6 +134,74 @@ namespace PokemonTcgMarketplace.Backend.Tests
             Assert.Equal(top.Count, top.Select(t => t.CardId).Distinct().Count());
         }
 
+        private async Task Seed(string id, string name, Func<int, (decimal Market, decimal Low)?> priceDaysAgo, int days = 30)
+        {
+            using var scope = fixture.Factory.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.Cards.Add(new Card { Id = id, Name = name, Number = "1", SetId = "seed", SetName = "Seeded Set" });
+            for (var ago = days; ago >= 0; ago--)
+            {
+                if (priceDaysAgo(ago) is not { } p) continue;
+                db.PriceSnapshots.Add(new PriceSnapshot
+                {
+                    CardId = id, Variant = "holofoil", Date = Today.AddDays(-ago), Market = p.Market, Low = p.Low, Mid = p.Market,
+                });
+            }
+            await db.SaveChangesAsync();
+        }
+
+        [Fact]
+        public async Task Down_trend_needs_a_steady_fall_not_one_bad_day()
+        {
+            // $40 → $28 in a straight line over 30 days.
+            await Seed("trd-steady", "Steady Decline", ago => (28m + ago * 0.4m, 28m));
+            // Same net drop, but swinging ±$8 day to day: the line doesn't fit.
+            await Seed("trd-noisy", "Noisy", ago => (28m + ago * 0.4m + (ago % 2 == 0 ? 8m : -8m) * (ago is 0 or 30 ? 0 : 1), 20m));
+            // Falling, but only three data points.
+            await Seed("trd-sparse", "Sparse", ago => ago is 0 or 10 or 20 ? (40m - (20 - ago), 1m) : null);
+            // Falling in a straight line, but under $2.
+            await Seed("trd-cheap", "Cheap", ago => (1m + ago * 0.05m, 1m));
+
+            var trend = await Get<DownTrend>("/api/market/downtrend?days=30&limit=50");
+
+            Assert.Equal(Today, trend.To);
+            var steady = Assert.Single(trend.Cards, c => c.CardId == "trd-steady");
+            Assert.Equal(40m, steady.From);
+            Assert.Equal(28m, steady.To);
+            Assert.Equal(-30.0m, steady.ChangePercent);
+            Assert.Equal(1.0, steady.Fit);
+            Assert.Equal(31, steady.Points.Count);
+            Assert.Equal(Today, steady.Points[^1].Date);
+            Assert.DoesNotContain(trend.Cards, c => c.CardId is "trd-noisy" or "trd-sparse" or "trd-cheap");
+        }
+
+        [Fact]
+        public async Task Sleepers_are_quiet_cards_with_no_listings_near_the_market_price()
+        {
+            // Sells around $20, cheapest listing $26; barely moved in 30 days.
+            await Seed("slp-quiet", "Quiet Gap", ago => ago is 0 ? (20m, 26m) : (19m, 19m));
+            // Same gap, but already up 50% this month: not sleeping.
+            await Seed("slp-moved", "Already Moved", ago => ago is 0 ? (30m, 39m) : (20m, 20m));
+            // Listings right at the market price.
+            await Seed("slp-supplied", "Well Supplied", ago => ago is 0 ? (20m, 21m) : (20m, 20m));
+            // A $100 listing on a $10 card is an outlier, not a signal.
+            await Seed("slp-outlier", "Outlier", ago => ago is 0 ? (10m, 100m) : (10m, 10m));
+            // New card with no 30-day history: still counts, with no 30-day change.
+            await Seed("slp-new", "New Gap", ago => (10m, 12m), days: 3);
+
+            var sleepers = await Get<Sleepers>("/api/market/sleepers?limit=50");
+
+            Assert.Equal(Today, sleepers.AsOf);
+            var quiet = Assert.Single(sleepers.Cards, c => c.CardId == "slp-quiet");
+            Assert.Equal(30.0m, quiet.ListingGapPercent);
+            Assert.Equal(5.3m, quiet.Change30Percent);
+            var fresh = Assert.Single(sleepers.Cards, c => c.CardId == "slp-new");
+            Assert.Equal(20.0m, fresh.ListingGapPercent);
+            Assert.Null(fresh.Change30Percent);
+            Assert.True(sleepers.Cards.ToList().IndexOf(quiet) < sleepers.Cards.ToList().IndexOf(fresh));
+            Assert.DoesNotContain(sleepers.Cards, c => c.CardId is "slp-moved" or "slp-supplied" or "slp-outlier");
+        }
+
         [Fact]
         public async Task Upstream_outage_is_a_502_with_an_explanation()
         {

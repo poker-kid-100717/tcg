@@ -88,3 +88,46 @@ public record ValuableCard(
     string? TcgplayerUrl,
     string VariantLabel,
     decimal Market);
+
+public record TrendPoint(DateOnly Date, decimal Market);
+
+/// <summary>A card whose price has fallen steadily across the window (see PriceGuideService.GetDownTrendingAsync).</summary>
+public record TrendingCard(
+    string CardId,
+    string Name,
+    string Number,
+    string SetId,
+    string SetName,
+    string? ImageUrl,
+    string? TcgplayerUrl,
+    string Variant,
+    string VariantLabel,
+    decimal From,
+    decimal To,
+    decimal ChangePercent,
+    double Fit,
+    IReadOnlyList<TrendPoint> Points);
+
+public record DownTrend(DateOnly? From, DateOnly? To, int Days, int DaysOfHistory, IReadOnlyList<TrendingCard> Cards);
+
+/// <summary>
+/// A card whose cheapest listing is well above what it has been selling for
+/// (see PriceGuideService.GetSleepersAsync).
+/// </summary>
+public record SleeperCard(
+    string CardId,
+    string Name,
+    string Number,
+    string SetId,
+    string SetName,
+    string? ImageUrl,
+    string? TcgplayerUrl,
+    string Variant,
+    string VariantLabel,
+    decimal Market,
+    decimal Low,
+    decimal? Mid,
+    decimal ListingGapPercent,
+    decimal? Change30Percent);
+
+public record Sleepers(DateOnly? AsOf, IReadOnlyList<SleeperCard> Cards);

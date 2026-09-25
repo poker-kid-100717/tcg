@@ -150,6 +150,124 @@ public class PriceGuideService(PokemonTcgClient client, AppDbContext db, HybridC
             t.card.ImageSmall, t.card.TcgplayerUrl, Prices.VariantLabel(t.Variant), t.Market)).ToList();
     }
 
+    /// <summary>
+    /// Cards falling steadily over the last <paramref name="days"/> days, not just between two dates: a
+    /// least-squares line through each printing's daily market prices (Postgres <c>regr_slope</c> and
+    /// <c>regr_r2</c>) must slope down and fit well (r² ≥ 0.6, so one bad day doesn't count), with at
+    /// least five points and a drop of 10% or more from the first to the latest price.
+    /// </summary>
+    public async Task<DownTrend> GetDownTrendingAsync(int days, int limit, decimal minPrice, CancellationToken cancellationToken)
+    {
+        var latest = await db.PriceSnapshots.MaxAsync(s => (DateOnly?)s.Date, cancellationToken);
+        var history = await db.PriceSnapshots.Select(s => s.Date).Distinct().CountAsync(cancellationToken);
+        if (latest is null) return new DownTrend(null, null, days, 0, []);
+
+        var fetch = limit * 4;
+        var rows = await db.Database.SqlQuery<TrendRow>($"""
+            WITH latest AS (SELECT max(date) AS d FROM price_snapshots),
+            w AS (
+                SELECT s.card_id, s.variant, s.date, s.market, (s.date - l.d)::float8 AS x, s.market::float8 AS y
+                FROM price_snapshots s CROSS JOIN latest l
+                WHERE s.date >= l.d - {days} AND s.market IS NOT NULL
+            ),
+            fit AS (
+                SELECT card_id, variant, count(*) AS n, regr_slope(y, x) AS slope, regr_r2(y, x) AS r2,
+                       (array_agg(market ORDER BY date))[1] AS first_price,
+                       (array_agg(market ORDER BY date DESC))[1] AS last_price,
+                       max(date) AS last_date
+                FROM w GROUP BY card_id, variant
+            )
+            SELECT f.card_id AS "CardId", f.variant AS "Variant", f.first_price AS "From", f.last_price AS "To", f.r2 AS "Fit"
+            FROM fit f CROSS JOIN latest l
+            WHERE f.n >= 5 AND f.slope < 0 AND f.r2 >= 0.6 AND f.last_date = l.d
+              AND f.last_price >= {minPrice} AND f.last_price <= f.first_price * 0.9
+            ORDER BY f.last_price / f.first_price, f.card_id
+            LIMIT {fetch}
+            """).ToListAsync(cancellationToken);
+
+        var picked = rows.DistinctBy(r => r.CardId).Take(limit).ToList();
+        var ids = picked.Select(r => r.CardId).ToList();
+        var from = latest.Value.AddDays(-days);
+        var cards = await db.Cards.AsNoTracking().Where(c => ids.Contains(c.Id)).ToDictionaryAsync(c => c.Id, cancellationToken);
+        var points = (await db.PriceSnapshots.AsNoTracking()
+                .Where(s => ids.Contains(s.CardId) && s.Date >= from && s.Market != null)
+                .OrderBy(s => s.Date)
+                .Select(s => new { s.CardId, s.Variant, s.Date, Market = s.Market!.Value })
+                .ToListAsync(cancellationToken))
+            .ToLookup(s => (s.CardId, s.Variant));
+
+        var trending = picked.Where(r => cards.ContainsKey(r.CardId)).Select(r =>
+        {
+            var card = cards[r.CardId];
+            return new TrendingCard(
+                card.Id, card.Name, card.Number, card.SetId, card.SetName, card.ImageSmall, card.TcgplayerUrl,
+                r.Variant, Prices.VariantLabel(r.Variant), r.From, r.To, Math.Round((r.To / r.From - 1) * 100, 1),
+                Math.Round(r.Fit, 2), points[(r.CardId, r.Variant)].Select(p => new TrendPoint(p.Date, p.Market)).ToList());
+        }).ToList();
+
+        return new DownTrend(from, latest, days, history, trending);
+    }
+
+    private sealed class TrendRow
+    {
+        public required string CardId { get; init; }
+        public required string Variant { get; init; }
+        public decimal From { get; init; }
+        public decimal To { get; init; }
+        public double Fit { get; init; }
+    }
+
+    /// <summary>
+    /// Possible sleepers: printings whose cheapest TCGplayer listing is at least <paramref name="minGap"/>
+    /// above what the card has actually been selling for, while the sale price itself has stayed quiet
+    /// (within 15% of 30 days ago, when there's that much history). Thin supply at the market price
+    /// tends to come before the market price catching up. Gaps over 3× are left out as likely bad data.
+    /// </summary>
+    public async Task<Sleepers> GetSleepersAsync(int limit, decimal minPrice, decimal minGap, CancellationToken cancellationToken)
+    {
+        var latest = await db.PriceSnapshots.MaxAsync(s => (DateOnly?)s.Date, cancellationToken);
+        if (latest is null) return new Sleepers(null, []);
+
+        var baseline = await db.PriceSnapshots.Where(s => s.Date <= latest.Value.AddDays(-30)).MaxAsync(s => (DateOnly?)s.Date, cancellationToken);
+        var factor = 1 + minGap;
+        var fetch = limit * 4;
+        var rows = await db.Database.SqlQuery<SleeperRow>($"""
+            SELECT s.card_id AS "CardId", s.variant AS "Variant", s.market AS "Market", s.low AS "Low", s.mid AS "Mid",
+                   b.market AS "Then"
+            FROM price_snapshots s
+            LEFT JOIN price_snapshots b ON b.card_id = s.card_id AND b.variant = s.variant AND b.date = {baseline}
+            WHERE s.date = {latest.Value} AND s.market >= {minPrice}
+              AND s.low >= s.market * {factor} AND s.low <= s.market * 3
+              AND (b.market IS NULL OR abs(s.market / b.market - 1) <= 0.15)
+            ORDER BY s.low / s.market DESC, s.card_id
+            LIMIT {fetch}
+            """).ToListAsync(cancellationToken);
+
+        var picked = rows.DistinctBy(r => r.CardId).Take(limit).ToList();
+        var ids = picked.Select(r => r.CardId).ToList();
+        var cards = await db.Cards.AsNoTracking().Where(c => ids.Contains(c.Id)).ToDictionaryAsync(c => c.Id, cancellationToken);
+
+        return new Sleepers(latest, picked.Where(r => cards.ContainsKey(r.CardId)).Select(r =>
+        {
+            var card = cards[r.CardId];
+            return new SleeperCard(
+                card.Id, card.Name, card.Number, card.SetId, card.SetName, card.ImageSmall, card.TcgplayerUrl,
+                r.Variant, Prices.VariantLabel(r.Variant), r.Market, r.Low, r.Mid,
+                Math.Round((r.Low / r.Market - 1) * 100, 1),
+                r.Then is { } then ? Math.Round((r.Market / then - 1) * 100, 1) : null);
+        }).ToList());
+    }
+
+    private sealed class SleeperRow
+    {
+        public required string CardId { get; init; }
+        public required string Variant { get; init; }
+        public decimal Market { get; init; }
+        public decimal Low { get; init; }
+        public decimal? Mid { get; init; }
+        public decimal? Then { get; init; }
+    }
+
     private DateOnly Today() => DateOnly.FromDateTime(clock.GetUtcNow().UtcDateTime);
 
     /// <summary>Collector numbers are mostly numeric ("12") but not always ("TG05", "SV001").</summary>

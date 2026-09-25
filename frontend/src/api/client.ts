@@ -1,10 +1,12 @@
 import type {
   CardDetail,
+  DownTrend,
   MarketMovers,
   MarketStatus,
   SearchResults,
   SetDetail,
   SetSummary,
+  Sleepers,
   ValuableCard,
 } from './types';
 
@@ -49,4 +51,6 @@ export const api = {
   movers: (days: number, signal?: AbortSignal) => get<MarketMovers>(`/market/movers?days=${days}&limit=8`, signal),
   top: (signal?: AbortSignal) => get<ValuableCard[]>('/market/top?limit=12', signal),
   status: (signal?: AbortSignal) => get<MarketStatus>('/market/status', signal),
+  downtrend: (signal?: AbortSignal) => get<DownTrend>('/market/downtrend?days=30&limit=12', signal),
+  sleepers: (signal?: AbortSignal) => get<Sleepers>('/market/sleepers?limit=12', signal),
 };

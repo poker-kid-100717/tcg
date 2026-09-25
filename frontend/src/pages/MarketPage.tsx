@@ -1,7 +1,8 @@
 import { useSearchParams } from 'react-router-dom';
 
-import { useMarketStatus, useMovers, useTopCards } from '../api/hooks';
+import { useDownTrend, useMarketStatus, useMovers, useSleepers, useTopCards } from '../api/hooks';
 import { CardTile } from '../components/CardTile';
+import { SleepersList, TrendingDownList } from '../components/MarketSignals';
 import { MoversTable } from '../components/MoversTable';
 import { ErrorState, Loading } from '../components/States';
 import { formatDate } from '../lib/format';
@@ -18,6 +19,8 @@ export default function MarketPage() {
   const movers = useMovers(days);
   const top = useTopCards();
   const status = useMarketStatus();
+  const downtrend = useDownTrend();
+  const sleepers = useSleepers();
 
   return (
     <div className="container-custom grid gap-10 py-8 sm:py-10">
@@ -67,6 +70,57 @@ export default function MarketPage() {
           Not enough history for this window yet. Prices are recorded once a day; check back after a few more snapshots.
         </p>
       )}
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <section id="trending-down" aria-labelledby="trending-down-title" className="panel overflow-hidden">
+          <div className="grid gap-1 border-b border-slate-200 px-4 py-3">
+            <h2 id="trending-down-title" className="text-lg">
+              Trending down
+            </h2>
+            <p className="text-xs text-slate-500">
+              A steady fall over the last 30 days, not one bad day: a straight line through the daily prices has to slope
+              down and fit closely, with at least 5 days of prices and a drop of 10% or more.
+            </p>
+          </div>
+          {downtrend.isPending ? (
+            <Loading label="Loading trends…" />
+          ) : downtrend.error ? (
+            <ErrorState error={downtrend.error} onRetry={() => downtrend.refetch()} />
+          ) : (
+            <TrendingDownList
+              cards={downtrend.data.cards}
+              empty={
+                downtrend.data.daysOfHistory < 5
+                  ? `Needs at least 5 days of prices; ${downtrend.data.daysOfHistory} recorded so far.`
+                  : 'Nothing over $2 is in a steady decline right now.'
+              }
+            />
+          )}
+        </section>
+
+        <section id="sleepers" aria-labelledby="sleepers-title" className="panel overflow-hidden">
+          <div className="grid gap-1 border-b border-slate-200 px-4 py-3">
+            <h2 id="sleepers-title" className="text-lg">
+              Sleepers
+            </h2>
+            <p className="text-xs text-slate-500">
+              Quiet cards with nothing listed near what they sell for: the cheapest TCGplayer listing is at least 10% above
+              the market price, and the market price has moved less than 15% in 30 days. Thin supply often comes before a
+              price catches up.
+            </p>
+          </div>
+          {sleepers.isPending ? (
+            <Loading label="Loading sleepers…" />
+          ) : sleepers.error ? (
+            <ErrorState error={sleepers.error} onRetry={() => sleepers.refetch()} />
+          ) : (
+            <SleepersList cards={sleepers.data.cards} empty="No sleepers in the latest prices." />
+          )}
+        </section>
+      </div>
+      <p className="-mt-6 text-xs text-slate-500">
+        These are signals from TCGplayer prices, not financial advice. Check the listings before you buy.
+      </p>
 
       {top.data && top.data.length > 0 && (
         <section className="grid gap-4">

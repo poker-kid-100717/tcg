@@ -36,3 +36,9 @@ export const useMarketStatus = () =>
 /** 404s are answers, not failures worth retrying. */
 export const shouldRetry = (failureCount: number, error: unknown) =>
   !(error instanceof ApiError && error.status < 500) && failureCount < 2;
+
+export const useDownTrend = () =>
+  useQuery({ queryKey: ['downtrend'], queryFn: ({ signal }) => api.downtrend(signal), staleTime: minutes(30) });
+
+export const useSleepers = () =>
+  useQuery({ queryKey: ['sleepers'], queryFn: ({ signal }) => api.sleepers(signal), staleTime: minutes(30) });

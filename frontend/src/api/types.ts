@@ -117,3 +117,55 @@ export interface MarketStatus {
   pricesWritten: number | null;
   daysOfHistory: number;
 }
+
+export interface TrendPoint {
+  date: string;
+  market: number;
+}
+
+export interface TrendingCard {
+  cardId: string;
+  name: string;
+  number: string;
+  setId: string;
+  setName: string;
+  imageUrl: string | null;
+  tcgplayerUrl: string | null;
+  variant: string;
+  variantLabel: string;
+  from: number;
+  to: number;
+  changePercent: number;
+  fit: number;
+  points: TrendPoint[];
+}
+
+export interface DownTrend {
+  from: string | null;
+  to: string | null;
+  days: number;
+  daysOfHistory: number;
+  cards: TrendingCard[];
+}
+
+export interface SleeperCard {
+  cardId: string;
+  name: string;
+  number: string;
+  setId: string;
+  setName: string;
+  imageUrl: string | null;
+  tcgplayerUrl: string | null;
+  variant: string;
+  variantLabel: string;
+  market: number;
+  low: number;
+  mid: number | null;
+  listingGapPercent: number;
+  change30Percent: number | null;
+}
+
+export interface Sleepers {
+  asOf: string | null;
+  cards: SleeperCard[];
+}

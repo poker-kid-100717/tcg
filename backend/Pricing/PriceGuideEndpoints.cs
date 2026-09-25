@@ -34,6 +34,12 @@ public static class PriceGuideEndpoints
         api.MapGet("/market/top", (int? limit, PriceGuideService guide, CancellationToken ct) =>
             guide.GetMostValuableAsync(Math.Clamp(limit ?? 12, 1, 50), ct));
 
+        api.MapGet("/market/downtrend", (int? days, int? limit, decimal? minPrice, PriceGuideService guide, CancellationToken ct) =>
+            guide.GetDownTrendingAsync(Math.Clamp(days ?? 30, 7, 365), Math.Clamp(limit ?? 12, 1, 50), minPrice ?? 2m, ct));
+
+        api.MapGet("/market/sleepers", (int? limit, decimal? minPrice, PriceGuideService guide, CancellationToken ct) =>
+            guide.GetSleepersAsync(Math.Clamp(limit ?? 12, 1, 50), minPrice ?? 2m, 0.10m, ct));
+
         api.MapGet("/market/status", async (AppDbContext db, CancellationToken ct) =>
         {
             var lastRun = await db.SnapshotRuns.AsNoTracking()
