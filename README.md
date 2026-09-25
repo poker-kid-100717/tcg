@@ -160,9 +160,11 @@ Browser ──► api.pokemontcg.io         public card catalog, fetched directl
   The next request starts it again, taking a few seconds.
 - **Database.** Neon Postgres. Paste Neon's `postgresql://` URL as-is;
   the API converts it to an Npgsql connection string.
-- **Pipeline.** On push to `main`, the backend, frontend and Worker checks
-  run. The deploy job then builds the frontend, runs `wrangler deploy`, and
-  smoke-tests `/health`, a client-side route, and an authenticated API route.
+- **Pipeline.** On push to `main`, `.github/workflows/ci.yml` runs backend,
+  frontend and Worker checks. A separate `.github/workflows/deploy-cloudflare.yml`
+  workflow mirrors the portfolio deployment pattern: it builds the frontend,
+  runs `wrangler deploy`, injects runtime secrets from GitHub Actions, and
+  smoke-tests the production domain.
 
 ### One-time setup
 
@@ -173,10 +175,15 @@ Browser ──► api.pokemontcg.io         public card catalog, fetched directl
 
 | Secret | Value |
 |---|---|
-| `CLOUDFLARE_API_TOKEN` | API token using the "Edit Cloudflare Workers" template |
+| `CLOUDFLARE_API_TOKEN` | API token with Workers Scripts Write, Workers Containers Write, and Workers Routes Write for `tcg-portfolio-sample.app` |
 | `CLOUDFLARE_ACCOUNT_ID` | Workers & Pages → Account ID |
 | `DATABASE_URL` | Neon connection URL |
 | `JWT_KEY` | A long random string, e.g. `openssl rand -base64 48` |
+
+The GitHub deployment workflow passes `DATABASE_URL` and `JWT_KEY` to
+Wrangler as Worker secrets, so no manual Cloudflare Secrets Store binding is
+required. The production Worker is `tcg` and its custom domain is
+`tcg-portfolio-sample.app`.
 
 To deploy by hand, run `npx wrangler login`, set the two runtime secrets with
 `npx wrangler secret put DATABASE_URL` and `npx wrangler secret put JWT_KEY`,
