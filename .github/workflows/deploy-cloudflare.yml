@@ -1,0 +1,66 @@
+name: deploy-cloudflare
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tcg-cloudflare-production
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: |
+            package-lock.json
+            frontend/package-lock.json
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          npm ci --prefix frontend
+
+      - name: Build frontend
+        run: npm run build:frontend
+        env:
+          CI: true
+
+      - name: Deploy to Cloudflare Workers
+        id: deploy
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: deploy
+          secrets: |
+            DATABASE_URL
+            JWT_KEY
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          JWT_KEY: ${{ secrets.JWT_KEY }}
+
+      - name: Verify production site and API
+        shell: bash
+        run: |
+          set -euo pipefail
+          SITE="https://tcg-portfolio-sample.app"
+
+          curl --fail --silent --show-error --retry 12 --retry-delay 10 --retry-all-errors "$SITE/health" | grep -q Healthy
+          curl --fail --silent --show-error "$SITE/sets" | grep -q '<div id="root">'
+
+          code="$(curl --silent --show-error -o /dev/null -w '%{http_code}' "$SITE/api/orders")"
+          test "$code" = 401 || {
+            echo "expected 401 from unauthenticated /api/orders, got $code"
+            exit 1
+          }
