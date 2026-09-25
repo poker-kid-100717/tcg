@@ -1,0 +1,27 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "pokemon-tcg-marketplace",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-09-01",
+  // React build served from the edge; /api/* and /health go to the Worker,
+  // which forwards them to the .NET container.
+  "assets": {
+    "directory": "./frontend/build",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/health", "/health/*"]
+  },
+  "containers": [
+    {
+      "class_name": "TcgApi",
+      "image": "./backend/Dockerfile",
+      "max_instances": 1,
+      "instance_type": "basic"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [{ "name": "API", "class_name": "TcgApi" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["TcgApi"] }],
+  "observability": { "enabled": true }
+}

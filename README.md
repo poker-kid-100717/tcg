@@ -4,8 +4,9 @@ A full-stack marketplace for Pokémon trading cards: browse the full card catalo
 track price history and investment potential, and manage a cart, wishlist and
 order history behind real authentication.
 
-- **Backend**: ASP.NET Core 8 Web API, EF Core over SQLite, JWT auth (BCrypt password hashing)
+- **Backend**: ASP.NET Core 10 Web API, EF Core over PostgreSQL, JWT auth (BCrypt password hashing)
 - **Frontend**: React 19 (Create React App), Tailwind CSS, Chart.js, React Router
+- **Hosting**: Cloudflare Workers (frontend + edge routing) and Cloudflare Containers (API), Postgres on Neon
 
 ## Features
 
@@ -14,16 +15,17 @@ order history behind real authentication.
 - **Price history & investment analysis** - per-card price trend chart and a computed investment-potential rating (rarity, price growth, set rotation, popularity)
 - **Accounts** - register/login issuing a JWT, passwords hashed with BCrypt, never stored or transmitted in the clear
 - **Cart** - guest-friendly, persisted in the browser via `localStorage`
-- **Checkout, orders & wishlist** - require sign-in; persisted server-side per user in SQLite so they survive a page refresh, a different device, or a backend restart
+- **Checkout, orders & wishlist** - require sign-in; persisted server-side per user in PostgreSQL so they survive a page refresh, a different device, or a backend restart
 
 ## Tech stack
 
 | Layer | Technology |
 |---|---|
-| Backend | ASP.NET Core 8, EF Core 8, SQLite, JWT Bearer auth, BCrypt.Net, Swagger |
+| Backend | ASP.NET Core 10, EF Core 10, PostgreSQL (Npgsql), JWT Bearer auth, BCrypt.Net, Swagger |
 | Frontend | React 19, React Router 7, Tailwind CSS, Chart.js, Axios |
 | Testing | xUnit (backend), Jest + React Testing Library (frontend) |
-| CI | GitHub Actions - builds and tests both projects on every push/PR to `main` |
+| Hosting | Cloudflare Workers + Containers, Neon Postgres |
+| CI/CD | GitHub Actions - builds and tests backend, frontend and Worker on every push/PR; `main` deploys to Cloudflare |
 
 ## Architecture
 
@@ -42,16 +44,14 @@ frontend/
                         wishlistService (backend), cartService (local cart)
 ```
 
-**Why SQLite, not SQL Server or a hosted database?** The original scaffold used
-EF Core's `InMemoryDatabase` provider, which throws away all data on every
-restart - registrations, orders and wishlists all vanished the moment the
-process stopped. SQLite is a real, ACID-compliant relational database that
-needs zero external infrastructure: `dotnet run` creates and migrates a single
-`pokemontcg.db` file next to the project, so anyone cloning this repo can run
-it immediately without installing or provisioning a database server. EF Core
-migrations (`backend/Migrations/`) manage the schema, exactly as they would
-against SQL Server or PostgreSQL in a larger deployment - swapping the
-provider later is a one-line change in `Program.cs`.
+**Why PostgreSQL?** Orders, order items, wishlists and users are relational
+data with foreign keys and transactional writes, which is exactly what Postgres
+is for. It also runs anywhere: a Docker container locally, and a managed,
+serverless instance (Neon) in production, which suits an API that scales to
+zero. EF Core migrations (`backend/Migrations/`) own the schema and are applied
+on startup; CI fails if the model changes without a matching migration.
+The earlier SQLite version stored data in a file on local disk, which a
+disposable container can't keep.
 
 **Why does the frontend call the public Pokémon TCG API directly for card
 data, when the backend also has `CardsController`/`SetsController`?** Card and
@@ -75,8 +75,18 @@ modify their own orders and wishlist.
 
 ### Prerequisites
 
-- [.NET SDK 8.0](https://dotnet.microsoft.com/download)
-- [Node.js 20+](https://nodejs.org/) and npm
+- [.NET SDK 10.0](https://dotnet.microsoft.com/download)
+- [Node.js 22+](https://nodejs.org/) and npm
+- [Docker](https://docs.docker.com/get-docker/) (for the local Postgres)
+
+### Database
+
+```bash
+docker compose up -d   # Postgres 17 on localhost:5432 (user/password: postgres)
+```
+
+The Development connection string in `backend/appsettings.Development.json`
+points here.
 
 ### Backend
 
@@ -128,7 +138,49 @@ Start the backend first (so the API is listening), then the frontend in a
 second terminal. Register a new account or sign in with the demo credentials
 above, add a few cards to your cart, and check out - the order is created via
 `POST /api/orders` and is visible on the Orders page even after you restart
-the backend, since it's persisted in `backend/pokemontcg.db`.
+the backend, since it's persisted in Postgres.
+
+## Deployment
+
+Everything runs on Cloudflare, under one origin:
+
+```
+Browser ──► Cloudflare Worker (worker/index.ts)
+              ├── /*                → React build (static assets, SPA fallback)
+              └── /api/*, /health   → Cloudflare Container: ASP.NET Core 10 API
+                                          └──► Neon Postgres
+Browser ──► api.pokemontcg.io         public card catalog, fetched directly
+```
+
+- **One origin.** The Worker serves the frontend and forwards API calls to the
+  container, so there is no CORS in production and the frontend is built with
+  `REACT_APP_API_URL=/api`.
+- **Container.** `backend/Dockerfile` is built and pushed by `wrangler deploy`.
+  It runs as a non-root user, holds no state, and sleeps after 10 minutes idle.
+  The next request starts it again, taking a few seconds.
+- **Database.** Neon Postgres. Paste Neon's `postgresql://` URL as-is;
+  the API converts it to an Npgsql connection string.
+- **Pipeline.** On push to `main`, the backend, frontend and Worker checks
+  run. The deploy job then builds the frontend, runs `wrangler deploy`, and
+  smoke-tests `/health`, a client-side route, and an authenticated API route.
+
+### One-time setup
+
+1. Create a Postgres database on [Neon](https://neon.tech) and copy its
+   connection URL.
+2. Cloudflare Containers requires the Workers Paid plan.
+3. Add these GitHub repository secrets:
+
+| Secret | Value |
+|---|---|
+| `CLOUDFLARE_API_TOKEN` | API token using the "Edit Cloudflare Workers" template |
+| `CLOUDFLARE_ACCOUNT_ID` | Workers & Pages → Account ID |
+| `DATABASE_URL` | Neon connection URL |
+| `JWT_KEY` | A long random string, e.g. `openssl rand -base64 48` |
+
+To deploy by hand, run `npx wrangler login`, set the two runtime secrets with
+`npx wrangler secret put DATABASE_URL` and `npx wrangler secret put JWT_KEY`,
+then run `npm run deploy`. Docker must be running for this.
 
 ## Tests
 
@@ -142,8 +194,11 @@ Covers `TokenService` (JWT issue/validate round-trip, tampered-signature
 rejection), `UserService` (password hashing, wishlist and order persistence,
 per-user isolation), `AuthController` (register/login success and failure
 paths), `OrdersController` (create + list orders for the authenticated user)
-and `PokemonTcgService` (response parsing and its in-memory caching, against a
-stubbed `HttpMessageHandler` - no real network calls).
+`PokemonTcgService` (response parsing and its in-memory caching, against a
+stubbed `HttpMessageHandler` - no real network calls) and
+`PostgresConnectionString` (Neon-style URL parsing). CI also runs
+`dotnet ef migrations has-pending-model-changes` so schema changes can't ship
+without a migration.
 
 ### Frontend
 
@@ -157,15 +212,28 @@ successful and failed login/register calls, asserting in particular that
 neither the plaintext password nor the JWT ever end up in the persisted user
 profile.
 
+### Edge Worker
+
+```bash
+npm install
+npm test
+```
+
+Covers the Worker's routing: API paths reach the container with the
+original scheme, client IP and `Authorization` header forwarded, and
+everything else is served from static assets.
+
 ## Security notes
 
 - Passwords are hashed with BCrypt (`BCrypt.Net-Next`) before they ever reach
   the database; the API never stores or returns a plaintext password.
 - The JWT signing key is read from configuration/environment, not hardcoded -
   see "JWT signing key" above.
-- CORS is currently wide open (`AllowAnyOrigin`) to keep local development
-  simple; a real deployment should restrict it to the frontend's actual
-  origin.
+- CORS allows any origin only in Development. In production, frontend and
+  API share one origin through the Worker, so no cross-origin access is
+  allowed unless listed in `Cors:AllowedOrigins`.
+- The API container runs as a non-root user and holds no secrets on disk;
+  `DATABASE_URL` and `JWT_KEY` are Worker secrets passed in at start.
 - This repository's history (prior to the cleanup commit) contains a
   previously-committed cloud credentials file and a `.env` with a database
   connection string. They have been removed from the working tree and a
