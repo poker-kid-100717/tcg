@@ -17,6 +17,7 @@ builder.Services.AddMemoryCache();
 // /health is readiness (includes the database); /health/live only says the
 // process is up, which is what the container runtime pings on start.
 builder.Services.AddSingleton<DatabaseInitializationStatus>();
+builder.Services.AddHostedService<DatabaseInitializer>();
 builder.Services.AddHealthChecks()
     .AddDbContextCheck<AppDbContext>("database")
     .AddCheck<DatabaseInitializationHealthCheck>("database-migrations");
@@ -116,24 +117,6 @@ builder.Services.AddAuthentication(opt =>
 });
 
 var app = builder.Build();
-
-// Seed data
-using (var scope = app.Services.CreateScope())
-{
-    var services = scope.ServiceProvider;
-    try
-    {
-        var context = services.GetRequiredService<AppDbContext>();
-        DbInitializer.Initialize(context);
-        services.GetRequiredService<DatabaseInitializationStatus>().MarkSucceeded();
-    }
-    catch (Exception ex)
-    {
-        services.GetRequiredService<DatabaseInitializationStatus>().MarkFailed(ex);
-        var logger = services.GetRequiredService<ILogger<Program>>();
-        logger.LogError(ex, "An error occurred while migrating or seeding the database.");
-    }
-}
 
 // Configure the HTTP request pipeline
 if (app.Environment.IsDevelopment())
