@@ -34,7 +34,7 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
 
 // CORS: in production the frontend and API share one origin through the
 // Worker, so no cross-origin access is needed. Development allows any
-// origin so the CRA dev server (port 3000) can reach the API (port 5259).
+// origin so the Vite dev server (port 3000) can reach the API (port 5259).
 var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [];
 builder.Services.AddCors(options =>
 {

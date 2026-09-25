@@ -1,7 +1,9 @@
 import axios from 'axios';
 
 // Base URL of the ASP.NET Core backend (see backend/Properties/launchSettings.json).
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5259/api';
+// Same-origin by default: the Worker routes /api in production, and the Vite
+// dev server proxies it to the local API.
+const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
 
 const TOKEN_STORAGE_KEY = 'pokemonTCGToken';
 

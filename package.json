@@ -6,7 +6,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "build:frontend": "cd frontend && REACT_APP_API_URL=/api npm run build",
+    "build:frontend": "npm run build --prefix frontend",
     "deploy": "npm run build:frontend && wrangler deploy"
   },
   "devDependencies": {

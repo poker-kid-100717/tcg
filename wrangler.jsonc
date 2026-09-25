@@ -17,7 +17,7 @@
   // React build served from the edge; /api/* and /health go to the Worker,
   // which forwards them to the .NET container.
   "assets": {
-    "directory": "./frontend/build",
+    "directory": "./frontend/dist",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
     "run_worker_first": [

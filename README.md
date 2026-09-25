@@ -5,7 +5,7 @@ track price history and investment potential, and manage a cart, wishlist and
 order history behind real authentication.
 
 - **Backend**: ASP.NET Core 10 Web API, EF Core over PostgreSQL, JWT auth (BCrypt password hashing)
-- **Frontend**: React 19 (Create React App), Tailwind CSS, Chart.js, React Router
+- **Frontend**: React 19 (Vite, route-level code splitting), Tailwind CSS, Chart.js, React Router
 - **Hosting**: Cloudflare Workers (frontend + edge routing) and Cloudflare Containers (API), Postgres on Neon
 
 ## Features
@@ -125,12 +125,13 @@ startup with a clear error rather than silently signing tokens with nothing.
 ```bash
 cd frontend
 npm install
-npm start
+npm run dev        # http://localhost:3000
+npm test           # Vitest
 ```
 
-Opens on `http://localhost:3000`. It talks to the backend via
-`REACT_APP_API_URL` (see `frontend/.env.example`; defaults to
-`http://localhost:5259/api`).
+API calls go to `/api`, which the Vite dev server proxies to the backend on
+`http://localhost:5259` (see `frontend/vite.config.js`). Set `VITE_API_URL`
+to point somewhere else.
 
 ### Running both together
 
@@ -153,8 +154,8 @@ Browser ──► api.pokemontcg.io         public card catalog, fetched directl
 ```
 
 - **One origin.** The Worker serves the frontend and forwards API calls to the
-  container, so there is no CORS in production and the frontend is built with
-  `REACT_APP_API_URL=/api`.
+  container, so there is no CORS in production and the frontend calls `/api` on its own
+  origin.
 - **Container.** `backend/Dockerfile` is built and pushed by `wrangler deploy`.
   It runs as a non-root user, holds no state, and sleeps after 10 minutes idle.
   The next request starts it again, taking a few seconds.
