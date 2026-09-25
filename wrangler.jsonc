@@ -15,7 +15,7 @@
     }
   ],
   // React build served from the edge; /api/* and /health go to the Worker,
-  // which forwards them to the .NET container.
+  // which forwards them to the .NET container. /internal/* is never forwarded.
   "assets": {
     "directory": "./frontend/dist",
     "binding": "ASSETS",
@@ -50,6 +50,10 @@
       ]
     }
   ],
+  // Record TCGplayer prices once a day (worker/index.ts → scheduled).
+  "triggers": {
+    "crons": ["15 11 * * *"]
+  },
   "observability": {
     "enabled": true
   }
