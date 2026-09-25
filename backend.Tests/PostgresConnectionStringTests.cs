@@ -49,6 +49,15 @@ namespace PokemonTcgMarketplace.Backend.Tests
             Assert.Equal(ChannelBinding.Require, result.ChannelBinding);
         }
 
+        [Fact]
+        public void Normalize_KeepsGssEncryptionRequiredByUrl()
+        {
+            var result = new NpgsqlConnectionStringBuilder(PostgresConnectionString.Normalize(
+                "postgres://u:p@db.example.com/app?gssencmode=require"));
+
+            Assert.Equal(GssEncryptionMode.Require, result.GssEncryptionMode);
+        }
+
         [Theory]
         [InlineData("verify-full", SslMode.VerifyFull)]
         [InlineData("verify-ca", SslMode.VerifyCA)]

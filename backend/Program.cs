@@ -16,8 +16,10 @@ builder.Services.AddSwaggerGen();
 builder.Services.AddMemoryCache();
 // /health is readiness (includes the database); /health/live only says the
 // process is up, which is what the container runtime pings on start.
+builder.Services.AddSingleton<DatabaseInitializationStatus>();
 builder.Services.AddHealthChecks()
-    .AddDbContextCheck<AppDbContext>("database");
+    .AddDbContextCheck<AppDbContext>("database")
+    .AddCheck<DatabaseInitializationHealthCheck>("database-migrations");
 
 // In production the API runs in a Cloudflare Container behind a Worker, which
 // terminates TLS and forwards plain HTTP with X-Forwarded-Proto/For set. The
@@ -123,11 +125,13 @@ using (var scope = app.Services.CreateScope())
     {
         var context = services.GetRequiredService<AppDbContext>();
         DbInitializer.Initialize(context);
+        services.GetRequiredService<DatabaseInitializationStatus>().MarkSucceeded();
     }
     catch (Exception ex)
     {
+        services.GetRequiredService<DatabaseInitializationStatus>().MarkFailed(ex);
         var logger = services.GetRequiredService<ILogger<Program>>();
-        logger.LogError(ex, "An error occurred while seeding the database.");
+        logger.LogError(ex, "An error occurred while migrating or seeding the database.");
     }
 }
 

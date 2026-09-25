@@ -60,6 +60,9 @@ namespace PokemonTCG.API.Data
                     case "channel_binding":
                         builder.ChannelBinding = Enum.Parse<ChannelBinding>(value, ignoreCase: true);
                         break;
+                    case "gssencmode":
+                        builder.GssEncryptionMode = Enum.Parse<GssEncryptionMode>(value, ignoreCase: true);
+                        break;
                     // Other libpq-only options are ignored rather than failing startup.
                     default:
                         break;
