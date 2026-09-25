@@ -14,13 +14,17 @@ export default function ShopPage() {
   const [rarities, setRarities] = useState([]);
   const [types, setTypes] = useState([]);
   
-  // Initialize filters from URL query params
+  // Initialize filters from URL query params. Pagination is managed separately,
+  // so don't treat "page" as a filter.
   const initialFilters = {};
   for (const [key, value] of searchParams.entries()) {
-    initialFilters[key] = value;
+    if (key !== 'page') {
+      initialFilters[key] = value;
+    }
   }
   
   const { filters, setFilter, clearFilters, filtersToQueryString } = useFilters(initialFilters);
+  const filterQueryString = filtersToQueryString();
   
   // Pagination
   const { 
@@ -115,18 +119,23 @@ export default function ShopPage() {
     fetchFilterOptions();
   }, []);
   
-  // Update URL when filters change
+  // Keep the URL in sync without creating a navigation loop.
+  // filtersToQueryString is recreated by the custom hook on each render, so
+  // depend on its string result instead of the function identity. Also avoid
+  // calling setSearchParams when the URL is already correct.
   useEffect(() => {
-    const queryString = filtersToQueryString();
-    
-    // Add pagination
-    const updatedParams = new URLSearchParams(queryString);
+    const updatedParams = new URLSearchParams(filterQueryString);
     if (currentPage > 1) {
       updatedParams.set('page', currentPage.toString());
     }
-    
-    setSearchParams(updatedParams);
-  }, [filters, currentPage, setSearchParams, filtersToQueryString]);
+
+    const nextSearch = updatedParams.toString();
+    const currentSearch = searchParams.toString();
+
+    if (nextSearch !== currentSearch) {
+      setSearchParams(updatedParams, { replace: true });
+    }
+  }, [filterQueryString, currentPage, searchParams, setSearchParams]);
 
   return (
     <div className="bg-pokemon-background min-h-screen py-6 md:py-12">
