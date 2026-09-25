@@ -9,11 +9,21 @@ namespace PokemonTCG.API.Data
     /// </summary>
     public class DatabaseInitializationStatus
     {
-        public bool Succeeded { get; private set; }
+        private readonly TaskCompletionSource _succeeded = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public bool Succeeded => _succeeded.Task.IsCompleted;
         public Exception? Error { get; private set; }
 
-        public void MarkSucceeded() => (Succeeded, Error) = (true, null);
-        public void MarkFailed(Exception error) => (Succeeded, Error) = (false, error);
+        /// <summary>Completes once initialization has succeeded.</summary>
+        public Task WhenSucceeded => _succeeded.Task;
+
+        public void MarkSucceeded()
+        {
+            Error = null;
+            _succeeded.TrySetResult();
+        }
+
+        public void MarkFailed(Exception error) => Error = error;
     }
 
     public class DatabaseInitializationHealthCheck : IHealthCheck

@@ -129,6 +129,7 @@ if (app.Environment.IsDevelopment())
 // reaches the container over its private network, so there is no plain-HTTP
 // public entry point to redirect.
 app.UseForwardedHeaders();
+app.UseMiddleware<DatabaseReadinessMiddleware>();
 
 app.UseCors();
 

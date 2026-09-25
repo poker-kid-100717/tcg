@@ -17,6 +17,7 @@ export class TcgApi extends Container<Env> {
   defaultPort = 8080;
   sleepAfter = "10m";
   // Liveness only: a slow database should not stop the container starting.
+  // The API itself holds /api requests until the database is initialized.
   pingEndpoint = "localhost/health/live";
 
   constructor(ctx: DurableObjectState<{}>, env: Env) {
