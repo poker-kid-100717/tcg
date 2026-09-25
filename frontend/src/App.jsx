@@ -1,20 +1,26 @@
-import React from 'react';
+import React, { lazy, Suspense } from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import Header from './components/Header';
 import Footer from './components/Footer';
-import HomePage from './pages/HomePage';
-import ShopPage from './pages/ShopPage';
-import CardDetailPage from './pages/CardDetailPage';
-import SetsPage from './pages/SetsPage';
-import SetDetailPage from './pages/SetDetailPage';
-import SearchPage from './pages/SearchPage';
-import CartPage from './pages/CartPage';
-import LoginPage from './pages/LoginPage';
-import RegisterPage from './pages/RegisterPage';
-import CheckoutPage from './pages/CheckoutPage';
-import OrdersPage from './pages/OrdersPage';
-import WishlistPage from './pages/WishlistPage';
-import ArchitecturePage from './pages/ArchitecturePage';
+
+// Each page is its own chunk, so the first load only fetches the page shown.
+const HomePage = lazy(() => import('./pages/HomePage'));
+const ShopPage = lazy(() => import('./pages/ShopPage'));
+const CardDetailPage = lazy(() => import('./pages/CardDetailPage'));
+const SetsPage = lazy(() => import('./pages/SetsPage'));
+const SetDetailPage = lazy(() => import('./pages/SetDetailPage'));
+const SearchPage = lazy(() => import('./pages/SearchPage'));
+const CartPage = lazy(() => import('./pages/CartPage'));
+const LoginPage = lazy(() => import('./pages/LoginPage'));
+const RegisterPage = lazy(() => import('./pages/RegisterPage'));
+const CheckoutPage = lazy(() => import('./pages/CheckoutPage'));
+const OrdersPage = lazy(() => import('./pages/OrdersPage'));
+const WishlistPage = lazy(() => import('./pages/WishlistPage'));
+const ArchitecturePage = lazy(() => import('./pages/ArchitecturePage'));
+
+const PageLoading = () => (
+  <div className="container-custom py-12 text-center text-gray-500" role="status">Loading…</div>
+);
 
 function App() {
   return (
@@ -22,6 +28,7 @@ function App() {
       <div className="flex flex-col min-h-screen">
         <Header />
         <main className="flex-grow">
+          <Suspense fallback={<PageLoading />}>
           <Routes>
             <Route path="/" element={<HomePage />} />
             <Route path="/shop" element={<ShopPage />} />
@@ -64,6 +71,7 @@ function App() {
               </div>
             } />
           </Routes>
+          </Suspense>
         </main>
         <Footer />
       </div>

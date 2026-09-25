@@ -1,13 +1,14 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import httpClient from './httpClient';
 import authService from './authService';
 
-jest.mock('./httpClient', () => {
-  const post = jest.fn();
+vi.mock('./httpClient', () => {
+  const post = vi.fn();
   return {
     __esModule: true,
     default: { post },
-    getToken: jest.fn(),
-    setToken: jest.fn(),
+    getToken: vi.fn(),
+    setToken: vi.fn(),
   };
 });
 

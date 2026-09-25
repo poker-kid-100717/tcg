@@ -1,3 +1,2 @@
-// jest-dom adds custom jest matchers for asserting on DOM nodes.
-// See: https://github.com/testing-library/jest-dom
-import '@testing-library/jest-dom';
+// Adds jest-dom's DOM matchers (toBeInTheDocument, ...) to Vitest's expect.
+import '@testing-library/jest-dom/vitest';
