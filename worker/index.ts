@@ -3,6 +3,7 @@ import { Container } from "@cloudflare/containers";
 export interface Env {
   ASSETS: Fetcher;
   API: DurableObjectNamespace<TcgApi>;
+  INVENTORY: DurableObjectNamespace<InventoryApi>;
   /** Cloudflare Workers AI; configured through wrangler.jsonc. */
   AI?: { run: (model: string, input: unknown) => Promise<unknown> };
   // GitHub Actions uploads these as Worker secrets during deploy.
@@ -14,6 +15,10 @@ export interface Env {
   TCG_STRIPE_WEBHOOK_SECRET?: string;
   TCG_STRIPE_PRO_MONTHLY_PRICE_ID?: string;
   TCG_STRIPE_PRO_ANNUAL_PRICE_ID?: string;
+  TCG_STRIPE_STORE_FINDER_MONTHLY_PRICE_ID?: string;
+  TCG_STRIPE_COMPLETE_MONTHLY_PRICE_ID?: string;
+  /** Official Best Buy Developer API key for store-level near-real-time inventory. */
+  TCG_BESTBUY_API_KEY?: string;
   /** Forward-looking replacement/enrichment provider for the deprecated Pokémon TCG API. */
   TCG_SCRYDEX_API_KEY?: string;
   TCG_SCRYDEX_TEAM_ID?: string;
@@ -41,8 +46,29 @@ export class TcgApi extends Container<Env> {
       ...(env.TCG_STRIPE_WEBHOOK_SECRET ? { Billing__StripeWebhookSecret: env.TCG_STRIPE_WEBHOOK_SECRET } : {}),
       ...(env.TCG_STRIPE_PRO_MONTHLY_PRICE_ID ? { Billing__ProMonthlyPriceId: env.TCG_STRIPE_PRO_MONTHLY_PRICE_ID } : {}),
       ...(env.TCG_STRIPE_PRO_ANNUAL_PRICE_ID ? { Billing__ProAnnualPriceId: env.TCG_STRIPE_PRO_ANNUAL_PRICE_ID } : {}),
+      ...(env.TCG_STRIPE_STORE_FINDER_MONTHLY_PRICE_ID ? { Billing__StoreFinderMonthlyPriceId: env.TCG_STRIPE_STORE_FINDER_MONTHLY_PRICE_ID } : {}),
+      ...(env.TCG_STRIPE_COMPLETE_MONTHLY_PRICE_ID ? { Billing__CompleteMonthlyPriceId: env.TCG_STRIPE_COMPLETE_MONTHLY_PRICE_ID } : {}),
       ...(env.TCG_SCRYDEX_API_KEY ? { Scrydex__ApiKey: env.TCG_SCRYDEX_API_KEY } : {}),
       ...(env.TCG_SCRYDEX_TEAM_ID ? { Scrydex__TeamId: env.TCG_SCRYDEX_TEAM_ID } : {}),
+    };
+  }
+}
+
+/**
+ * Store inventory runs as its own container so retailer polling, release-day traffic and provider failures
+ * cannot destabilize pricing, predictions or account workflows.
+ */
+export class InventoryApi extends Container<Env> {
+  defaultPort = 8080;
+  sleepAfter = "10m";
+  pingEndpoint = "localhost/health/live";
+
+  constructor(ctx: DurableObjectState<{}>, env: Env) {
+    super(ctx, env);
+    this.envVars = {
+      ASPNETCORE_ENVIRONMENT: "Production",
+      ConnectionStrings__DefaultConnection: env.TCG_DATABASE_URL,
+      ...(env.TCG_BESTBUY_API_KEY ? { Inventory__BestBuyApiKey: env.TCG_BESTBUY_API_KEY } : {}),
     };
   }
 }
@@ -52,6 +78,7 @@ export const isApiPath = (pathname: string) =>
   pathname.startsWith("/api/") || pathname === "/health" || pathname.startsWith("/health/");
 
 const api = (env: Env) => env.API.getByName("api");
+const inventoryApi = (env: Env) => env.INVENTORY.getByName("inventory");
 
 /** Must match the second entry in wrangler.jsonc triggers.crons. */
 export const PREDICTIONS_CRON = "45 11 * * *";
@@ -62,6 +89,40 @@ export default {
 
     if (!isApiPath(url.pathname)) {
       return env.ASSETS.fetch(request);
+    }
+
+    // Store Finder is separately entitled. The edge gateway verifies the account with the core API
+    // before forwarding precise coordinates to Inventory.Service. The core account service never stores those coordinates.
+    if (url.pathname.startsWith("/api/inventory/")) {
+      const sessionHeaders = new Headers(request.headers);
+      sessionHeaders.set("X-Forwarded-Proto", url.protocol.slice(0, -1));
+      const sessionUrl = new URL(request.url);
+      sessionUrl.pathname = "/api/session";
+      sessionUrl.search = "";
+
+      const sessionResponse = await api(env).fetch(new Request(sessionUrl, {
+        method: "POST",
+        headers: sessionHeaders,
+      }));
+      if (!sessionResponse.ok) return sessionResponse;
+
+      const account = await sessionResponse.json() as { hasStoreFinder?: boolean };
+      if (!account.hasStoreFinder) {
+        return Response.json(
+          {
+            title: "Store Finder required",
+            detail: "Available in Stores is a separate Store Finder subscription.",
+            status: 403,
+          },
+          { status: 403 },
+        );
+      }
+
+      const inventoryHeaders = new Headers(request.headers);
+      inventoryHeaders.set("X-Forwarded-Proto", url.protocol.slice(0, -1));
+      const clientIp = request.headers.get("CF-Connecting-IP");
+      if (clientIp) inventoryHeaders.set("X-Forwarded-For", clientIp);
+      return inventoryApi(env).fetch(new Request(request, { headers: inventoryHeaders }));
     }
 
     // AI Set Advisor stays at the edge. The .NET API provides only grounded,
