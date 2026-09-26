@@ -19,5 +19,5 @@ export const formatPercent = (fraction: number, digits = 0) => `${(fraction * 10
 export const GOALS: { value: import('../api/types').SetGoalKind; label: string; hint: string }[] = [
   { value: 'MainSet', label: 'Main set', hint: 'One of every card up to the printed total' },
   { value: 'FullSet', label: 'Full set', hint: 'Every card, secret rares included' },
-  { value: 'MasterSet', label: 'Master set', hint: 'Every card in every printing: normal, reverse holo, holo…' },
+  { value: 'MasterSet', label: 'Master set', hint: 'Every card in every printing: normal, reverse holo, holo and the rest' },
 ];

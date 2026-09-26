@@ -19,7 +19,7 @@ export function SetGoalPanel({ setId, setName, checklist }: { setId: string; set
   const missingPrintings = checklist?.master.missing ?? [];
 
   return (
-    <section aria-label="Set goal" className="panel mb-8 grid gap-4 p-5">
+    <section aria-label="Set goal" className="panel mb-8 grid grid-cols-[minmax(0,1fr)] gap-4 p-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-lg">{goal ? `Your goal: ${GOALS.find((g) => g.value === goal)!.label.toLowerCase()}` : `Collect ${setName}`}</h2>
         <div role="group" aria-label="Goal for this set" className="flex flex-wrap gap-1 rounded-lg bg-slate-100 p-1 text-sm font-semibold">
@@ -41,7 +41,7 @@ export function SetGoalPanel({ setId, setName, checklist }: { setId: string; set
       <p className="text-sm text-slate-600">{GOALS.find((g) => g.value === shown)!.hint}.</p>
 
       {progress && (
-        <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-center">
+        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
           <div className="grid gap-2">
             <p className="font-semibold text-slate-900">
               {progress.owned} of {progress.total} {shown === 'MasterSet' ? 'printings' : 'cards'} ({Math.round(percent)}%)
@@ -61,7 +61,7 @@ export function SetGoalPanel({ setId, setName, checklist }: { setId: string; set
       {goal === 'MasterSet' && missingPrintings.length > 0 && (
         <div className="grid gap-2">
           <h3 className="text-sm font-semibold text-slate-700">Printings you still need</h3>
-          <ul className="grid gap-1.5 sm:grid-cols-2" aria-label="Printings you still need">
+          <ul className="grid grid-cols-[minmax(0,1fr)] gap-1.5 sm:grid-cols-2" aria-label="Printings you still need">
             {(showAll ? missingPrintings : missingPrintings.slice(0, MISSING_SHOWN)).map((m) => (
               <li key={`${m.cardId}-${m.variant ?? 'any'}`} className="flex items-center gap-3 rounded-lg bg-slate-50 px-3 py-2 text-sm">
                 <Link to={`/cards/${encodeURIComponent(m.cardId)}`} className="min-w-0 flex-1 truncate hover:text-pokemon-blue">
