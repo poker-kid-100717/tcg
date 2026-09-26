@@ -4,15 +4,17 @@ import { api } from '../api/client';
 import { useSession } from '../api/hooks';
 import { Loading } from '../components/States';
 
+type CheckoutPlan = 'monthly' | 'annual' | 'storefinder' | 'complete';
+
 export default function ProPage() {
   const session = useSession();
-  const [working, setWorking] = useState<'monthly' | 'annual' | 'portal' | null>(null);
+  const [working, setWorking] = useState<CheckoutPlan | 'portal' | null>(null);
   const [error, setError] = useState('');
 
-  if (session.isPending) return <Loading label="Loading Pro…" />;
+  if (session.isPending) return <Loading label="Loading plans…" />;
 
   const account = session.data;
-  const goCheckout = async (plan: 'monthly' | 'annual') => {
+  const goCheckout = async (plan: CheckoutPlan) => {
     setWorking(plan);
     setError('');
     try {
@@ -36,34 +38,37 @@ export default function ProPage() {
     }
   };
 
+  const preview = !account?.billingConfigured;
+
   return (
     <div className="container-custom grid gap-10 py-10 sm:py-14">
       <header className="mx-auto grid max-w-3xl gap-3 text-center">
-        <p className="eyebrow">TCG Signal Pro</p>
-        <h1 className="text-4xl sm:text-5xl">Understand the market behind the price.</h1>
+        <p className="eyebrow">TCG Signal plans</p>
+        <h1 className="text-4xl sm:text-5xl">Price intelligence and local inventory, separately or together.</h1>
         <p className="text-lg text-slate-600">
-          Confidence, history, watch alerts and deal math for collectors who need more than a single “market value” number.
+          Pro helps evaluate the market. Store Finder monitors supported retailers near you and only surfaces
+          store-level inventory that meets the evidence standard.
         </p>
-        {!account?.billingConfigured && (
+        {preview && (
           <div className="mx-auto mt-2 rounded-full bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-800 ring-1 ring-emerald-200">
-            Founding preview active — every Pro feature is unlocked while billing is being configured.
+            Founding preview active — paid features are unlocked while billing is being configured.
           </div>
         )}
       </header>
 
-      <div className="mx-auto grid w-full max-w-4xl gap-5 md:grid-cols-2">
+      <div className="mx-auto grid w-full max-w-6xl gap-5 lg:grid-cols-3">
         <Plan
-          name="Free"
-          price="$0"
-          description="For looking up cards and following the broad market."
-          features={['Card and set lookup', 'Current TCGplayer price data', 'Basic price history', 'Market movers and signals', 'Up to 3 watched printings when billing is live']}
-        />
-        <Plan
-          featured
           name="Pro"
           price="$9.99/mo"
-          description="For collectors making buy, sell, grade and trade decisions."
-          features={['Market Confidence with transparent reasons', 'Deal Analyzer and break-even math', 'Unlimited watchlist and threshold alerts', 'Unlimited Master Set trackers + AI Set Advisor', 'Personal dashboard', 'Longer signal context and model outlook']}
+          description="Market intelligence for buy, sell, grade and trade decisions."
+          features={[
+            'Market Confidence with transparent reasons',
+            'Deal Analyzer and break-even math',
+            'Unlimited watchlist and threshold alerts',
+            'Unlimited Master Set trackers + AI Set Advisor',
+            'Personal dashboard',
+            'Longer signal context and model outlook',
+          ]}
           actions={
             account?.isPro && account.billingConfigured ? (
               <button type="button" className="btn w-full bg-pokemon-pokeblue text-white" disabled={working !== null} onClick={manage}>
@@ -79,9 +84,60 @@ export default function ProPage() {
                 </button>
               </div>
             ) : (
-              <div className="rounded-lg bg-emerald-50 px-4 py-3 text-center text-sm font-semibold text-emerald-800">
-                Pro preview enabled on this device
-              </div>
+              <Preview label="Pro preview enabled on this device" />
+            )
+          }
+        />
+
+        <Plan
+          featured
+          name="Store Finder"
+          price="$4.99/mo"
+          description="Local Pokémon inventory monitoring built around accuracy rather than alert volume."
+          features={[
+            'Available in Stores account tab',
+            '5, 10, 25, 50 or 100 mile radius',
+            'Store-level availability only',
+            'Verification timestamp and evidence on every result',
+            'Confidence score and low-stock disclosure',
+            'Retailer coverage status instead of silent failures',
+          ]}
+          actions={
+            account?.hasStoreFinder && account.storeFinderBillingConfigured ? (
+              <button type="button" className="btn w-full bg-pokemon-pokeblue text-white" disabled={working !== null} onClick={manage}>
+                {working === 'portal' ? 'Opening…' : 'Manage subscription'}
+              </button>
+            ) : account?.storeFinderBillingConfigured ? (
+              <button type="button" className="btn w-full bg-pokemon-pokeblue text-white" disabled={working !== null} onClick={() => goCheckout('storefinder')}>
+                {working === 'storefinder' ? 'Opening…' : 'Add Store Finder · $4.99'}
+              </button>
+            ) : (
+              <Preview label="Store Finder preview enabled on this device" />
+            )
+          }
+        />
+
+        <Plan
+          name="Complete"
+          price="$12.99/mo"
+          description="Both TCG Signal Pro and Store Finder under one subscription."
+          features={[
+            'Everything in Pro',
+            'Everything in Store Finder',
+            'One billing plan',
+            'Best value for active collectors',
+          ]}
+          actions={
+            account?.plan === 'complete' && account.billingConfigured ? (
+              <button type="button" className="btn w-full bg-pokemon-pokeblue text-white" disabled={working !== null} onClick={manage}>
+                {working === 'portal' ? 'Opening…' : 'Manage subscription'}
+              </button>
+            ) : account?.billingConfigured ? (
+              <button type="button" className="btn w-full bg-pokemon-pokeblue text-white" disabled={working !== null} onClick={() => goCheckout('complete')}>
+                {working === 'complete' ? 'Opening…' : 'Choose Complete · $12.99'}
+              </button>
+            ) : (
+              <Preview label="Complete preview enabled on this device" />
             )
           }
         />
@@ -89,17 +145,21 @@ export default function ProPage() {
 
       {error && <p className="mx-auto max-w-xl rounded-lg bg-red-50 px-4 py-3 text-center text-sm text-red-800">{error}</p>}
 
-      <section className="mx-auto grid max-w-4xl gap-4 sm:grid-cols-3">
-        <Feature title="Confidence, not false precision" body="The app scores freshness, history, volatility and spread—and explicitly says when transaction-level liquidity is unknown." />
-        <Feature title="Useful at the moment of purchase" body="Deal Analyzer turns an asking price, fees, tax and shipping into descriptive break-even and net-proceeds math." />
-        <Feature title="Your market, not everyone’s" body="Watch exact printings, set thresholds and surface changes on a personal dashboard after each daily snapshot." />
+      <section className="mx-auto grid max-w-6xl gap-4 sm:grid-cols-3">
+        <Feature title="Accuracy before coverage" body="Retailers are added only after their store-level source is validated. An empty result is preferable to a false trip across town." />
+        <Feature title="Useful at the moment of purchase" body="Store Finder combines radius, distance, evidence, verification time and retailer links so a collector can act quickly." />
+        <Feature title="Independent service boundary" body="Inventory runs separately from pricing so release-day polling, retailer failures and scaling do not destabilize the core market API." />
       </section>
 
       <p className="mx-auto max-w-3xl text-center text-xs leading-5 text-slate-500">
-        Pricing signals are informational and are not financial advice. TCG Signal does not guarantee a sale price, future appreciation, or model accuracy.
+        Store availability can change between verification and arrival. TCG Signal reports the source and time of each observation and never invents quantity.
       </p>
     </div>
   );
+}
+
+function Preview({ label }: { label: string }) {
+  return <div className="rounded-lg bg-emerald-50 px-4 py-3 text-center text-sm font-semibold text-emerald-800">{label}</div>;
 }
 
 function Plan({ name, price, description, features, actions, featured = false }: {
