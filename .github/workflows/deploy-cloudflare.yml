@@ -60,6 +60,9 @@ jobs:
           TCG_STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
           TCG_STRIPE_PRO_MONTHLY_PRICE_ID: ${{ secrets.STRIPE_PRO_MONTHLY_PRICE_ID }}
           TCG_STRIPE_PRO_ANNUAL_PRICE_ID: ${{ secrets.STRIPE_PRO_ANNUAL_PRICE_ID }}
+          TCG_STRIPE_STORE_FINDER_MONTHLY_PRICE_ID: ${{ secrets.STRIPE_STORE_FINDER_MONTHLY_PRICE_ID }}
+          TCG_STRIPE_COMPLETE_MONTHLY_PRICE_ID: ${{ secrets.STRIPE_COMPLETE_MONTHLY_PRICE_ID }}
+          TCG_BESTBUY_API_KEY: ${{ secrets.BESTBUY_API_KEY }}
         run: |
           set -euo pipefail
 
@@ -78,6 +81,9 @@ jobs:
           put_if_present TCG_STRIPE_WEBHOOK_SECRET "$TCG_STRIPE_WEBHOOK_SECRET"
           put_if_present TCG_STRIPE_PRO_MONTHLY_PRICE_ID "$TCG_STRIPE_PRO_MONTHLY_PRICE_ID"
           put_if_present TCG_STRIPE_PRO_ANNUAL_PRICE_ID "$TCG_STRIPE_PRO_ANNUAL_PRICE_ID"
+          put_if_present TCG_STRIPE_STORE_FINDER_MONTHLY_PRICE_ID "$TCG_STRIPE_STORE_FINDER_MONTHLY_PRICE_ID"
+          put_if_present TCG_STRIPE_COMPLETE_MONTHLY_PRICE_ID "$TCG_STRIPE_COMPLETE_MONTHLY_PRICE_ID"
+          put_if_present TCG_BESTBUY_API_KEY "$TCG_BESTBUY_API_KEY"
 
       - name: Verify production site and API
         shell: bash
@@ -88,6 +94,7 @@ jobs:
           curl --fail --silent --show-error --retry 12 --retry-delay 10 --retry-all-errors "$SITE/health" | grep -q Healthy
           curl --fail --silent --show-error "$SITE/sets" | grep -q '<div id="root">'
           curl --fail --silent --show-error "$SITE/pro" | grep -q '<div id="root">'
+          curl --fail --silent --show-error "$SITE/available-in-stores" | grep -q '<div id="root">'
 
           # The price guide API answers with the set list from the card database.
           curl --fail --silent --show-error --retry 3 --retry-delay 10 "$SITE/api/sets" | grep -q '"releaseDate"'
