@@ -8,6 +8,7 @@ export default function OutlookPage() {
   const up = usePredictions('up');
   const down = usePredictions('down');
   const horizon = model.data?.horizonDays || 30;
+  const preview = model.data?.status === 'Preview' || up.data?.status === 'Preview' || down.data?.status === 'Preview';
 
   return (
     <div className="container-custom grid gap-10 py-8 sm:py-10">
@@ -15,10 +16,20 @@ export default function OutlookPage() {
         <p className="eyebrow">Price outlook</p>
         <h1 className="text-3xl sm:text-4xl">Where prices are heading</h1>
         <p className="max-w-3xl text-slate-600">
-          A machine-learning model predicts each card&apos;s TCGplayer market price {horizon} days from now. It learns from
-          the recorded price history and from what the card is: the Pokémon on it, its rarity and printing, its set&apos;s
-          age and size, where it ranks in the set, the artist, and how its listings compare with what it sells for. Every
-          prediction lists the factors that moved it most.
+          {preview ? (
+            <>
+              The validated {horizon}-day model is still collecting daily history. Until it can train and beat the
+              no-change baseline, these lists show transparent early market signals from observed price movement or
+              TCGplayer listing pressure. They switch to model forecasts automatically once validation is possible.
+            </>
+          ) : (
+            <>
+              A machine-learning model predicts each card&apos;s TCGplayer market price {horizon} days from now. It learns
+              from the recorded price history and from what the card is: the Pokémon on it, its rarity and printing, its
+              set&apos;s age and size, where it ranks in the set, the artist, and how its listings compare with what it
+              sells for. Every prediction lists the factors that moved it most.
+            </>
+          )}
         </p>
       </div>
 
@@ -28,13 +39,20 @@ export default function OutlookPage() {
           const title = direction === 'up' ? 'Predicted to rise' : 'Predicted to fall';
           return (
             <section key={direction} aria-label={title} className="panel overflow-hidden">
-              <h2 className="border-b border-slate-200 px-4 py-3 text-lg">{title}</h2>
+              <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
+                <h2 className="text-lg">{title}</h2>
+                {list.data?.status === 'Preview' && (
+                  <span className="rounded-full bg-amber-50 px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-amber-700 ring-1 ring-amber-200">
+                    Early signal
+                  </span>
+                )}
+              </div>
               {list.isPending ? (
                 <Loading label="Loading predictions…" />
               ) : list.error ? (
                 <ErrorState error={list.error} onRetry={() => list.refetch()} />
               ) : (
-                <PredictionTable cards={list.data.cards} empty={statusMessage(list.data.status)} />
+                <PredictionTable cards={list.data.cards} empty={statusMessage(list.data.status)} status={list.data.status} />
               )}
             </section>
           );
@@ -73,7 +91,37 @@ function Stat({ label, value, note }: { label: string; value: string; note?: str
 
 function ModelCard({ summary }: { summary: NonNullable<ReturnType<typeof useModelSummary>['data']> }) {
   if (summary.typicalErrorPercent === null) {
-    return <p className="panel p-6 text-slate-600">{summary.message ?? statusMessage(summary.status)}</p>;
+    const target = Math.max(summary.approxHistoryDaysNeeded, 1);
+    const progress = Math.min(100, Math.round((summary.historyDays / target) * 100));
+    const mode =
+      summary.status === 'Preview'
+        ? 'Early signal'
+        : summary.status === 'Withheld'
+          ? 'Validation withheld'
+          : 'Collecting data';
+
+    return (
+      <div className="grid gap-4">
+        <p className="panel p-5 text-sm text-slate-600">{summary.message ?? statusMessage(summary.status)}</p>
+        <dl className="grid gap-4 sm:grid-cols-3">
+          <Stat label="History collected" value={`${summary.historyDays} days`} note="daily TCGplayer snapshots" />
+          <Stat label="Training target" value={`~${summary.approxHistoryDaysNeeded} days`} note={`for a ${summary.horizonDays}-day held-out test`} />
+          <Stat label="Current mode" value={mode} note="validated accuracy is never fabricated" />
+        </dl>
+        <div className="panel grid gap-2 p-5">
+          <div className="flex items-center justify-between gap-3 text-sm">
+            <span className="font-semibold text-slate-700">Model readiness</span>
+            <span className="tabular-nums text-slate-500">{progress}%</span>
+          </div>
+          <div className="h-2 overflow-hidden rounded-full bg-slate-100" aria-label={`Model readiness ${progress}%`}>
+            <div className="h-full rounded-full bg-pokemon-pokeblue" style={{ width: `${progress}%` }} />
+          </div>
+          <p className="text-xs text-slate-500">
+            The accuracy cards below replace this readiness view after the model has enough history to train and validate.
+          </p>
+        </div>
+      </div>
+    );
   }
   const pct = (n: number | null) => (n === null ? '—' : `${n.toFixed(1)}%`);
   const top = summary.importance.slice(0, 8);
