@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Hybrid;
 using PokemonTCG.API.Data;
+using PokemonTCG.API.Market;
 
 namespace PokemonTCG.API.Pricing;
 
@@ -9,7 +10,7 @@ namespace PokemonTCG.API.Pricing;
 /// API (cached, so repeat visits don't hit it); price history, movers and the
 /// most valuable cards come from the daily snapshots in Postgres.
 /// </summary>
-public class PriceGuideService(PokemonTcgClient client, AppDbContext db, HybridCache cache, TimeProvider clock, CatalogReader catalog)
+public class PriceGuideService(PokemonTcgClient client, AppDbContext db, HybridCache cache, TimeProvider clock, CatalogReader catalog, FreshnessOptions freshness)
 {
     private static readonly HybridCacheEntryOptions Hours12 = new() { Expiration = TimeSpan.FromHours(12) };
     private static readonly HybridCacheEntryOptions Hour = new() { Expiration = TimeSpan.FromHours(1) };
@@ -48,9 +49,10 @@ public class PriceGuideService(PokemonTcgClient client, AppDbContext db, HybridC
             Hour,
             cancellationToken: cancellationToken);
 
-    public async Task<CardDetail?> GetCardAsync(string cardId, CancellationToken cancellationToken)
+    /// <summary>A card with its current prices and <paramref name="historyDays"/> of daily history.</summary>
+    public async Task<CardDetail?> GetCardAsync(string cardId, CancellationToken cancellationToken, int historyDays = 30)
     {
-        var since = Today().AddDays(-365);
+        var since = Today().AddDays(-historyDays);
         Task<List<PricePoint>> History(string id) => db.PriceSnapshots.AsNoTracking()
             .Where(s => s.CardId == id && s.Date >= since)
             .OrderBy(s => s.Date)
@@ -59,7 +61,10 @@ public class PriceGuideService(PokemonTcgClient client, AppDbContext db, HybridC
 
         if (await catalog.GetCardAsync(cardId, cancellationToken) is { } local)
         {
-            return local with { History = await History(cardId) };
+            return local with
+            {
+                History = await History(cardId), HistoryDays = historyDays, Freshness = freshness.Of(local.PricesUpdated, Today()),
+            };
         }
 
         var card = await cache.GetOrCreateAsync(
@@ -69,13 +74,19 @@ public class PriceGuideService(PokemonTcgClient client, AppDbContext db, HybridC
 
         var prices = (card.Tcgplayer?.Prices ?? new Dictionary<string, TcgPrice>())
             .OrderBy(p => Prices.VariantOrder(p.Key))
-            .Select(p => new VariantPrice(p.Key, Prices.VariantLabel(p.Key), p.Value.Low, p.Value.Mid, p.Value.High, p.Value.Market))
+            .Select(p => new VariantPrice(p.Key, Prices.VariantLabel(p.Key), p.Value.Low, p.Value.Mid, p.Value.High, p.Value.Market,
+                MarketProvider.PokemonTcg, card.Tcgplayer?.Updated))
             .ToList();
 
         return new CardDetail(
             card.Id, card.Name, card.Supertype, card.Subtypes ?? [], card.Hp, card.Types ?? [], card.Number,
             card.Artist, card.Rarity, card.FlavorText, card.Images?.Small, card.Images?.Large,
-            SetSummary.From(card.Set), prices, card.Tcgplayer?.Updated, card.Tcgplayer?.Url, history);
+            SetSummary.From(card.Set), prices, card.Tcgplayer?.Updated, card.Tcgplayer?.Url, history)
+        {
+            PriceProvider = prices.Count > 0 ? MarketProvider.PokemonTcg : null,
+            Freshness = freshness.Of(card.Tcgplayer?.Updated, Today()),
+            HistoryDays = historyDays,
+        };
     }
 
     public async Task<SearchResults> SearchAsync(string query, int page, int pageSize, CancellationToken cancellationToken) =>

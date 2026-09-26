@@ -66,6 +66,8 @@ namespace PokemonTCG.API.Data
         public int CardsSeen { get; set; }
         public int PricesWritten { get; set; }
         public string? Error { get; set; }
+        /// <summary>JSON: how each market data provider did in this run (see ProviderRunStatus).</summary>
+        public string? ProviderResults { get; set; }
     }
 
     public enum PredictionStatus
@@ -211,6 +213,7 @@ namespace PokemonTCG.API.Data
                 run.Property(r => r.CardsSeen).HasColumnName("cards_seen");
                 run.Property(r => r.PricesWritten).HasColumnName("prices_written");
                 run.Property(r => r.Error).HasColumnName("error").HasMaxLength(2000);
+                run.Property(r => r.ProviderResults).HasColumnName("provider_results").HasMaxLength(4000);
             });
 
             modelBuilder.Entity<PredictionRun>(run =>

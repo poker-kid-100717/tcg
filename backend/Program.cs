@@ -7,6 +7,8 @@ using PokemonTCG.API.Data;
 using PokemonTCG.API.Pricing;
 using PokemonTCG.API.Pricing.Predictions;
 using PokemonTCG.API.Pricing.Tcgplayer;
+using PokemonTCG.API.Market;
+using PokemonTCG.API.Market.Providers;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -86,6 +88,14 @@ builder.Services.AddDataProtection()
 
 builder.Services.AddSingleton(builder.Configuration.GetSection(SnapshotOptions.SectionName).Get<SnapshotOptions>() ?? new());
 builder.Services.AddScoped<TcgplayerPriceSync>();
+builder.Services.AddScoped<IMarketDataProvider, PokemonTcgMarketDataProvider>();
+builder.Services.AddScoped<IMarketDataProvider, TcgplayerMarketDataProvider>();
+builder.Services.Configure<EbayOptions>(builder.Configuration.GetSection(EbayOptions.SectionName));
+builder.Services.AddScoped<ICompProvider, EbayCompProvider>();
+builder.Services.AddScoped<CompIngestionService>();
+builder.Services.AddScoped<MarketStatusService>();
+builder.Services.AddSingleton<SnapshotGate>();
+builder.Services.AddSingleton(builder.Configuration.GetSection(FreshnessOptions.SectionName).Get<FreshnessOptions>() ?? new());
 builder.Services.AddScoped<PriceSnapshotService>();
 builder.Services.AddScoped<CatalogReader>();
 builder.Services.AddScoped<PriceGuideService>();

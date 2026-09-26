@@ -41,7 +41,7 @@ public class CatalogReader(AppDbContext db)
         var set = await db.Sets.AsNoTracking().FirstOrDefaultAsync(s => s.Id == card.SetId, cancellationToken);
         var rows = await db.LatestPrices.AsNoTracking().Where(p => p.CardId == cardId).ToListAsync(cancellationToken);
         var prices = rows.OrderBy(p => Prices.VariantOrder(p.Variant))
-            .Select(p => new VariantPrice(p.Variant, Prices.VariantLabel(p.Variant), p.Low, p.Mid, p.High, p.Market))
+            .Select(p => new VariantPrice(p.Variant, Prices.VariantLabel(p.Variant), p.Low, p.Mid, p.High, p.Market, p.Provider, p.UpdatedOn))
             .ToList();
         var setSummary = set is not null
             ? ToSummary(set)
@@ -49,7 +49,11 @@ public class CatalogReader(AppDbContext db)
         return new CardDetail(
             card.Id, card.Name, card.Supertype, card.Subtypes, card.Hp, card.Types, card.Number, card.Artist, card.Rarity,
             card.FlavorText, card.ImageSmall, card.ImageLarge, setSummary, prices,
-            rows.Count == 0 ? null : rows.Max(p => p.UpdatedOn), TcgplayerUrl(card), []);
+            rows.Count == 0 ? null : rows.Max(p => p.UpdatedOn), TcgplayerUrl(card), [])
+        {
+            // The provider behind the headline printing's price.
+            PriceProvider = rows.OrderBy(p => Prices.VariantOrder(p.Variant)).FirstOrDefault(p => p.Market is not null)?.Provider,
+        };
     }
 
     /// <summary>Cards whose name, or any word in it, starts with the query; newest sets first.</summary>
