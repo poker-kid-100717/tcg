@@ -92,7 +92,9 @@ public class PredictionService(AppDbContext db, PredictionOptions options, TimeP
         var dates = new List<DateOnly>();
         for (var d = latest.Value; d >= earliest.Value; d = d.AddDays(-options.SampleEveryDays)) dates.Add(d);
         dates.Reverse();
-        var labelled = dates.Where(d => d.AddDays(horizon) <= latest.Value).ToList();
+        // A date is labelled only once its whole outcome window (horizon + grace days) has passed, so printings
+        // that get their outcome price during the grace days aren't missing from the newest validation dates.
+        var labelled = dates.Where(d => d.AddDays(horizon + OutcomeGraceDays) <= latest.Value).ToList();
         var validationDates = labelled.TakeLast(Math.Max(1, (int)Math.Ceiling(labelled.Count * options.ValidationFraction))).ToHashSet();
         var validationStart = validationDates.Count > 0 ? validationDates.Min() : latest.Value;
         // A label can come from up to OutcomeGraceDays after the horizon (when a card has no price on the exact day),
@@ -155,10 +157,14 @@ public class PredictionService(AppDbContext db, PredictionOptions options, TimeP
         var outputs = final.Predict(current.Select(Input).ToList());
 
         var predictions = current.Zip(outputs, (s, o) => ToPrediction(run, s, o, premiums[s.Date], species)).ToList();
-        run.Checkpoint = !await db.PredictionRuns.AnyAsync(r => r.Checkpoint && r.AsOf > latest.Value.AddDays(-7), cancellationToken);
+        run.Checkpoint = !await db.PredictionRuns.AnyAsync(
+            r => r.Checkpoint && r.Status == PredictionStatus.Published && r.FinishedAt != null && r.AsOf > latest.Value.AddDays(-7),
+            cancellationToken);
         db.PricePredictions.AddRange(predictions);
         run.Predictions = predictions.Count;
+        // Published and finished in one save: a run is never left published but unfinished (and so never served).
         run.Status = PredictionStatus.Published;
+        run.FinishedAt = clock.GetUtcNow();
         await db.SaveChangesAsync(cancellationToken);
 
         // Older runs' predictions aren't shown any more; keep only the weekly checkpoints still waiting to be scored.

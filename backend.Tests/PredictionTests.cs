@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -27,6 +28,12 @@ namespace PokemonTcgMarketplace.Backend.Tests
             var response = await fixture.CreateClient().PostAsync("/internal/predictions", null);
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             return (await response.Content.ReadFromJsonAsync<PredictionRunResult>(Json))!;
+        }
+
+        private async Task<List<PredictionRun>> AllRunsAsync()
+        {
+            using var scope = fixture.Factory.Services.CreateScope();
+            return await scope.ServiceProvider.GetRequiredService<AppDbContext>().PredictionRuns.AsNoTracking().ToListAsync();
         }
 
         /// <summary>Small deterministic noise, so no two cards move identically.</summary>
@@ -118,6 +125,8 @@ namespace PokemonTcgMarketplace.Backend.Tests
             var scored = Assert.Single(model.TrackRecord);
             Assert.Equal(Today.AddDays(-13), scored.AsOf);
             Assert.Equal(1, scored.Count);
+            Assert.Equal(7, scored.HorizonDays);
+            Assert.All(await AllRunsAsync(), r => Assert.True(r.Status != PredictionStatus.Published || r.FinishedAt is not null));
 
             var up = await Get<PredictionList>("/api/predictions?direction=up&limit=10&minPrice=1");
             Assert.Equal(10, up.Cards.Count);

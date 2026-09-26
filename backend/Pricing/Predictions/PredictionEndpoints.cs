@@ -27,7 +27,7 @@ public record PredictionList(PredictionStatus Status, DateOnly? AsOf, int Horizo
 public record FeatureWeight(string Feature, string Label, double Weight);
 
 /// <summary>How one week's published predictions did once their horizon passed. Errors are typical % misses.</summary>
-public record RealizedAccuracy(DateOnly AsOf, int Count, double TypicalErrorPercent, double NoChangeErrorPercent, double? DirectionAccuracyPercent);
+public record RealizedAccuracy(DateOnly AsOf, int HorizonDays, int Count, double TypicalErrorPercent, double NoChangeErrorPercent, double? DirectionAccuracyPercent);
 
 public record ModelSummary(
     PredictionStatus Status,
@@ -114,7 +114,7 @@ public static class PredictionEndpoints
                 run?.ResidualHigh is { } high ? Math.Round((Math.Exp(high) - 1) * 100, 1) : null,
                 Importance(run?.Importance),
                 track.Select(r => new RealizedAccuracy(
-                    r.AsOf!.Value, r.RealizedCount!.Value, TypicalMiss(r.RealizedMae) ?? 0, TypicalMiss(r.RealizedBaselineMae) ?? 0,
+                    r.AsOf!.Value, r.HorizonDays, r.RealizedCount!.Value, TypicalMiss(r.RealizedMae) ?? 0, TypicalMiss(r.RealizedBaselineMae) ?? 0,
                     AsPercent(r.RealizedDirectionAccuracy))).ToList(),
                 run?.Message ?? (run is null ? "The model hasn't run yet." : null));
         });

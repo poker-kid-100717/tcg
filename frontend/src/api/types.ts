@@ -211,6 +211,7 @@ export interface FeatureWeight {
 
 export interface RealizedAccuracy {
   asOf: string;
+  horizonDays: number;
   count: number;
   typicalErrorPercent: number;
   noChangeErrorPercent: number;

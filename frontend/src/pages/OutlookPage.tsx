@@ -113,7 +113,7 @@ function ModelCard({ summary }: { summary: NonNullable<ReturnType<typeof useMode
       <div className="panel overflow-x-auto p-5">
         <h3 className="mb-1 text-base">Track record</h3>
         <p className="mb-3 text-sm text-slate-600">
-          Once a week, the predictions are kept and checked against real prices when the {summary.horizonDays} days are up.
+          Once a week, the predictions are kept and checked against real prices when their horizon is up.
         </p>
         {summary.trackRecord.length === 0 ? (
           <p className="text-sm text-slate-500">No predictions have reached their date yet.</p>
@@ -122,6 +122,7 @@ function ModelCard({ summary }: { summary: NonNullable<ReturnType<typeof useMode
             <thead className="text-left text-xs uppercase tracking-wide text-slate-500">
               <tr>
                 <th className="py-1 pr-4 font-semibold">Predicted on</th>
+                <th className="py-1 pr-4 font-semibold">Horizon</th>
                 <th className="py-1 pr-4 font-semibold">Cards</th>
                 <th className="py-1 pr-4 font-semibold">Typical miss</th>
                 <th className="py-1 pr-4 font-semibold">“No change” miss</th>
@@ -132,6 +133,7 @@ function ModelCard({ summary }: { summary: NonNullable<ReturnType<typeof useMode
               {summary.trackRecord.map((r) => (
                 <tr key={r.asOf} className="border-t border-slate-100">
                   <td className="py-1.5 pr-4">{formatDate(r.asOf, 'short')}</td>
+                  <td className="py-1.5 pr-4">{r.horizonDays} days</td>
                   <td className="py-1.5 pr-4">{r.count.toLocaleString()}</td>
                   <td className={`py-1.5 pr-4 ${r.typicalErrorPercent < r.noChangeErrorPercent ? 'gain' : 'loss'}`}>
                     {pct(r.typicalErrorPercent)}

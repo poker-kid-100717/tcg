@@ -40,7 +40,7 @@ const model: ModelSummary = {
     { feature: 'change_30d', label: 'Change over 30 days', weight: 21.3 },
     { feature: 'pokemon_premium', label: 'Pokémon popularity', weight: 14.9 },
   ],
-  trackRecord: [{ asOf: '2026-08-20', count: 9800, typicalErrorPercent: 10.9, noChangeErrorPercent: 13.1, directionAccuracyPercent: 61 }],
+  trackRecord: [{ asOf: '2026-08-20', horizonDays: 30, count: 9800, typicalErrorPercent: 10.9, noChangeErrorPercent: 13.1, directionAccuracyPercent: 61 }],
   message: null,
 };
 
