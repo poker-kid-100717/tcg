@@ -75,6 +75,7 @@ public class CollectionService(AppDbContext db, CatalogReader catalog, PokemonTc
             context.Prices.Values.SelectMany(v => v.Values).Select(p => (DateOnly?)p.UpdatedOn).Max());
 
         return new CollectionView(summary, entries, history, await SetProgressAsync(items, ct), Signals(items, entries, context),
+            await GoalsAsync(userId, ct),
             new SellingFees(options.CommissionRate, options.PaymentRate, options.PerSaleFee), ConditionFactors);
     }
 
@@ -110,12 +111,62 @@ public class CollectionService(AppDbContext db, CatalogReader catalog, PokemonTc
                     cheapest?.Market ?? cheapest?.Mid, cheapest?.Low, timing, reason, CatalogReader.TcgplayerUrl(c));
             }).ToList();
 
+        var allPrices = await PricesByCardAsync(cardIds, ct);
+        var master = SetCompletion.Master(set, cards, allPrices, owned.Select(o => (o.CardId, o.Variant)).ToHashSet());
+        var goal = await db.SetGoals.AsNoTracking().Where(g => g.UserId == userId && g.SetId == setId).Select(g => (SetGoalKind?)g.Kind).FirstOrDefaultAsync(ct);
+
         return new SetChecklist(setId, set.PrintedTotal, cards.Count,
             owned.GroupBy(o => o.CardId).Select(g => new OwnedCard(g.Key, g.Sum(o => o.Quantity), g.Select(o => o.Variant).Distinct().ToList())).ToList(),
             missing,
             missing.Where(m => !m.Secret).Sum(m => m.Price ?? 0),
-            missing.Sum(m => m.Price ?? 0));
+            missing.Sum(m => m.Price ?? 0),
+            master,
+            goal);
     }
+
+    // ---------------------------------------------------------------- set goals
+
+    /// <summary>Starts (or re-targets) a goal to complete a set. Null when the set isn't in the catalog.</summary>
+    public async Task<GoalProgress?> SetGoalAsync(Guid userId, string setId, SetGoalKind kind, CancellationToken ct)
+    {
+        if (!Enum.IsDefined(kind)) throw new CollectionException(400, "Pick main set, full set or master set.");
+        if (!await db.Sets.AnyAsync(s => s.Id == setId, ct)) return null;
+        var goal = await db.SetGoals.FirstOrDefaultAsync(g => g.UserId == userId && g.SetId == setId, ct);
+        if (goal is null)
+        {
+            goal = new SetGoal { Id = Guid.CreateVersion7(), UserId = userId, SetId = setId, CreatedAt = clock.GetUtcNow() };
+            db.SetGoals.Add(goal);
+        }
+        goal.Kind = kind;
+        await db.SaveChangesAsync(ct);
+        return (await GoalsAsync(userId, ct)).Single(g => g.SetId == setId);
+    }
+
+    public async Task<bool> RemoveGoalAsync(Guid userId, string setId, CancellationToken ct) =>
+        await db.SetGoals.Where(g => g.UserId == userId && g.SetId == setId).ExecuteDeleteAsync(ct) > 0;
+
+    /// <summary>Progress on every set goal, least complete first after the ones closest to done.</summary>
+    public async Task<IReadOnlyList<GoalProgress>> GoalsAsync(Guid userId, CancellationToken ct)
+    {
+        var goals = await db.SetGoals.AsNoTracking().Where(g => g.UserId == userId).ToListAsync(ct);
+        if (goals.Count == 0) return [];
+        var setIds = goals.Select(g => g.SetId).ToList();
+        var sets = await db.Sets.AsNoTracking().Where(s => setIds.Contains(s.Id)).ToDictionaryAsync(s => s.Id, ct);
+        var cards = (await db.Cards.AsNoTracking().Where(c => setIds.Contains(c.SetId)).ToListAsync(ct)).ToLookup(c => c.SetId);
+        var cardIds = cards.SelectMany(g => g).Select(c => c.Id).ToList();
+        var prices = await PricesByCardAsync(cardIds, ct);
+        var owned = (await db.CollectionItems.AsNoTracking().Where(i => i.UserId == userId && cardIds.Contains(i.CardId))
+            .Select(i => new { i.CardId, i.Variant }).ToListAsync(ct)).Select(i => (i.CardId, i.Variant)).ToHashSet();
+
+        return goals.Where(g => sets.ContainsKey(g.SetId))
+            .Select(g => SetCompletion.Goal(g.Kind, sets[g.SetId], cards[g.SetId].ToList(), prices, owned))
+            .OrderByDescending(g => g.Completion).ThenBy(g => g.SetName)
+            .ToList();
+    }
+
+    private async Task<Dictionary<string, Dictionary<string, LatestPrice>>> PricesByCardAsync(IReadOnlyCollection<string> cardIds, CancellationToken ct) =>
+        (await db.LatestPrices.AsNoTracking().Where(p => cardIds.Contains(p.CardId)).ToListAsync(ct))
+            .GroupBy(p => p.CardId).ToDictionary(g => g.Key, g => g.ToDictionary(p => p.Variant));
 
     public async Task<IReadOnlyList<WishlistEntry>> GetWishlistAsync(Guid userId, CancellationToken ct)
     {

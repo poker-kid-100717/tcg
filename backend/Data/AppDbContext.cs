@@ -145,6 +145,7 @@ namespace PokemonTCG.API.Data
         public DbSet<LatestPrice> LatestPrices => Set<LatestPrice>();
         public DbSet<CollectionItem> CollectionItems => Set<CollectionItem>();
         public DbSet<WishlistItem> WishlistItems => Set<WishlistItem>();
+        public DbSet<SetGoal> SetGoals => Set<SetGoal>();
         public DbSet<Microsoft.AspNetCore.DataProtection.EntityFrameworkCore.DataProtectionKey> DataProtectionKeys => Set<Microsoft.AspNetCore.DataProtection.EntityFrameworkCore.DataProtectionKey>();
 
         public DbSet<Card> Cards => Set<Card>();
@@ -216,6 +217,19 @@ namespace PokemonTCG.API.Data
                 item.HasOne<AppUser>().WithMany().HasForeignKey(i => i.UserId).OnDelete(DeleteBehavior.Cascade);
                 item.HasOne<Card>().WithMany().HasForeignKey(i => i.CardId).OnDelete(DeleteBehavior.Restrict);
                 item.ToTable(t => t.HasCheckConstraint("ck_collection_items_quantity", "quantity > 0"));
+            });
+
+            modelBuilder.Entity<SetGoal>(goal =>
+            {
+                goal.ToTable("set_goals");
+                goal.Property(g => g.Id).HasColumnName("id");
+                goal.Property(g => g.UserId).HasColumnName("user_id");
+                goal.Property(g => g.SetId).HasColumnName("set_id").HasMaxLength(64);
+                goal.Property(g => g.Kind).HasColumnName("kind").HasConversion<string>().HasMaxLength(20);
+                goal.Property(g => g.CreatedAt).HasColumnName("created_at");
+                goal.HasIndex(g => new { g.UserId, g.SetId }).IsUnique();
+                goal.HasOne<AppUser>().WithMany().HasForeignKey(g => g.UserId).OnDelete(DeleteBehavior.Cascade);
+                goal.HasOne<CardSet>().WithMany().HasForeignKey(g => g.SetId).OnDelete(DeleteBehavior.Cascade);
             });
 
             modelBuilder.Entity<WishlistItem>(item =>

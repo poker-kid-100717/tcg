@@ -70,6 +70,27 @@ public class CollectionItem
 }
 
 /// <summary>A card the collector wants, with the price they'd buy at.</summary>
+/// <summary>Which version of a set a collector is chasing.</summary>
+public enum SetGoalKind
+{
+    /// <summary>One of every card up to the printed total ("1/165" to "165/165").</summary>
+    MainSet,
+    /// <summary>Every card, secret rares included.</summary>
+    FullSet,
+    /// <summary>Every card in every printing it comes in (normal, reverse holo, holo…), secret rares included.</summary>
+    MasterSet,
+}
+
+/// <summary>A set a collector has decided to complete, and to what standard.</summary>
+public class SetGoal
+{
+    public Guid Id { get; set; }
+    public Guid UserId { get; set; }
+    public string SetId { get; set; } = "";
+    public SetGoalKind Kind { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+}
+
 public class WishlistItem
 {
     public Guid Id { get; set; }

@@ -82,6 +82,7 @@ public record CollectionView(
     IReadOnlyList<ValuePoint> History,
     IReadOnlyList<SetProgress> Sets,
     IReadOnlyList<CollectionSignal> Signals,
+    IReadOnlyList<GoalProgress> Goals,
     SellingFees Fees,
     IReadOnlyDictionary<CardCondition, decimal> ConditionFactors);
 
@@ -101,6 +102,22 @@ public record MissingCard(
     string? TimingReason,
     string? TcgplayerUrl);
 
+/// <summary>A card in a printing the collector doesn't have yet.</summary>
+public record MissingPrinting(
+    string CardId,
+    string Name,
+    string Number,
+    string? ImageUrl,
+    bool Secret,
+    /// <summary>Null when no printing is known for the card (it has no price listed), so any copy fills it.</summary>
+    string? Variant,
+    string VariantLabel,
+    decimal? Price,
+    string? TcgplayerUrl);
+
+/// <summary>Every card in every printing it comes in, secret rares included.</summary>
+public record MasterChecklist(int Owned, int Total, decimal CostToComplete, int Unpriced, IReadOnlyList<MissingPrinting> Missing);
+
 public record SetChecklist(
     string SetId,
     int PrintedTotal,
@@ -108,7 +125,24 @@ public record SetChecklist(
     IReadOnlyList<OwnedCard> Owned,
     IReadOnlyList<MissingCard> Missing,
     decimal CostToCompleteBase,
-    decimal CostToCompleteAll);
+    decimal CostToCompleteAll,
+    MasterChecklist Master,
+    SetGoalKind? Goal);
+
+/// <summary>Progress toward a set the collector has chosen to complete.</summary>
+public record GoalProgress(
+    string SetId,
+    string SetName,
+    string? SymbolUrl,
+    string? LogoUrl,
+    SetGoalKind Kind,
+    int Owned,
+    int Total,
+    decimal Completion,
+    decimal CostToComplete,
+    int Unpriced);
+
+public record SetGoalRequest(SetGoalKind Kind);
 
 public record WishlistEntry(
     Guid Id,

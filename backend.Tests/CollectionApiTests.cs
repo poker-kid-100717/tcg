@@ -229,5 +229,57 @@ namespace PokemonTcgMarketplace.Backend.Tests
             Assert.Equal(HttpStatusCode.NoContent, (await client.DeleteAsync("/api/account")).StatusCode);
             Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/collection")).StatusCode);
         }
+        [Fact]
+        public async Task A_master_set_counts_every_printing_of_every_card()
+        {
+            var set = await SeedSet("mst1");
+            var client = Browser();
+            await client.PostAsync("/api/account/guest", null);
+            await client.PostAsJsonAsync("/api/collection/items", new AddItemRequest($"{set}-1", "normal"), Json);
+
+            var checklist = await Read<SetChecklist>(await client.GetAsync($"/api/collection/sets/{set}"));
+            // Pikachu comes in normal and reverse holo, Raichu and the secret Golden Pikachu in holofoil: 4 printings.
+            Assert.Equal((1, 4), (checklist.Master.Owned, checklist.Master.Total));
+            Assert.Equal(
+                [($"{set}-1", "reverseHolofoil", 4.00m), ($"{set}-2", "holofoil", 20.00m), ($"{set}-3", "holofoil", 100.00m)],
+                checklist.Master.Missing.Select(m => (m.CardId, m.Variant, m.Price)));
+            Assert.Equal("Reverse Holofoil", checklist.Master.Missing[0].VariantLabel);
+            Assert.Equal(124.00m, checklist.Master.CostToComplete);
+
+            // Owning the reverse holo in any condition fills its slot.
+            await client.PostAsJsonAsync("/api/collection/items", new AddItemRequest($"{set}-1", "reverseHolofoil", CardCondition.HeavilyPlayed), Json);
+            checklist = await Read<SetChecklist>(await client.GetAsync($"/api/collection/sets/{set}"));
+            Assert.Equal((2, 4, 120.00m), (checklist.Master.Owned, checklist.Master.Total, checklist.Master.CostToComplete));
+        }
+
+        [Fact]
+        public async Task Collectors_set_goals_and_track_each_one()
+        {
+            var main = await SeedSet("gol1");
+            var master = await SeedSet("gol2");
+            var client = Browser();
+            await client.PostAsync("/api/account/guest", null);
+            await client.PostAsJsonAsync("/api/collection/items", new AddItemRequest($"{main}-1", "normal"), Json);
+
+            Assert.Equal(HttpStatusCode.OK, (await client.PutAsJsonAsync($"/api/collection/goals/{main}", new SetGoalRequest(SetGoalKind.MainSet), Json)).StatusCode);
+            // A goal can start before owning a single card of the set.
+            Assert.Equal(HttpStatusCode.OK, (await client.PutAsJsonAsync($"/api/collection/goals/{master}", new SetGoalRequest(SetGoalKind.MasterSet), Json)).StatusCode);
+            Assert.Equal(HttpStatusCode.NotFound, (await client.PutAsJsonAsync("/api/collection/goals/nope", new SetGoalRequest(SetGoalKind.MasterSet), Json)).StatusCode);
+
+            var goals = (await Read<CollectionView>(await client.GetAsync("/api/collection"))).Goals;
+            var mainGoal = Assert.Single(goals, g => g.SetId == main);
+            Assert.Equal((SetGoalKind.MainSet, 1, 2, 20.00m), (mainGoal.Kind, mainGoal.Owned, mainGoal.Total, mainGoal.CostToComplete));
+            var masterGoal = Assert.Single(goals, g => g.SetId == master);
+            Assert.Equal((SetGoalKind.MasterSet, 0, 4, 126.00m), (masterGoal.Kind, masterGoal.Owned, masterGoal.Total, masterGoal.CostToComplete));
+
+            // Changing the goal re-targets it; the set page reports the current goal.
+            await client.PutAsJsonAsync($"/api/collection/goals/{main}", new SetGoalRequest(SetGoalKind.FullSet), Json);
+            var full = Assert.Single((await Read<CollectionView>(await client.GetAsync("/api/collection"))).Goals, g => g.SetId == main);
+            Assert.Equal((SetGoalKind.FullSet, 1, 3, 120.00m), (full.Kind, full.Owned, full.Total, full.CostToComplete));
+            Assert.Equal(SetGoalKind.FullSet, (await Read<SetChecklist>(await client.GetAsync($"/api/collection/sets/{main}"))).Goal);
+
+            Assert.Equal(HttpStatusCode.NoContent, (await client.DeleteAsync($"/api/collection/goals/{main}")).StatusCode);
+            Assert.DoesNotContain((await Read<CollectionView>(await client.GetAsync("/api/collection"))).Goals, g => g.SetId == main);
+        }
     }
 }

@@ -29,6 +29,12 @@ public static class CollectionEndpoints
         collection.MapGet("/sets/{setId}", async (string setId, ClaimsPrincipal user, CollectionService service, CancellationToken ct) =>
             await service.GetSetAsync(UserId(user), setId, ct) is { } checklist ? Results.Ok(checklist) : Results.NotFound());
 
+        collection.MapPut("/goals/{setId}", async (string setId, SetGoalRequest body, ClaimsPrincipal user, CollectionService service, CancellationToken ct) =>
+            await service.SetGoalAsync(UserId(user), setId, body.Kind, ct) is { } goal ? Results.Ok(goal) : Results.NotFound());
+
+        collection.MapDelete("/goals/{setId}", async (string setId, ClaimsPrincipal user, CollectionService service, CancellationToken ct) =>
+            await service.RemoveGoalAsync(UserId(user), setId, ct) ? Results.NoContent() : Results.NotFound());
+
         collection.MapPost("/sample", async (ClaimsPrincipal user, CollectionService service, CancellationToken ct) =>
             Results.Ok(new { Added = await service.AddSampleAsync(UserId(user), ct) }));
 
