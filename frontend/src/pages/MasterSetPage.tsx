@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 
-import { useAddWatch, useDeleteMasterSet, useMasterSet, useMasterSetAdvisor, useUpdateMasterSetItem } from '../api/hooks';
+import { useAddWatch, useDeleteMasterSet, useMasterSet, useMasterSetAdvisor, useSession, useUpdateMasterSetItem } from '../api/hooks';
 import type { MasterSetItem } from '../api/types';
 import { ErrorState, Loading } from '../components/States';
 import { formatPrice } from '../lib/format';
@@ -15,6 +15,7 @@ export default function MasterSetPage() {
   const remove = useDeleteMasterSet();
   const watch = useAddWatch();
   const advisor = useMasterSetAdvisor();
+  const session = useSession();
   const navigate = useNavigate();
   const [filter, setFilter] = useState<Filter>('missing');
 
@@ -93,9 +94,13 @@ export default function MasterSetPage() {
             <h2 className="text-xl">AI Set Advisor</h2>
             <p className="text-sm text-slate-600">Uses your actual missing-card data and deterministic market signals; it never invents card prices.</p>
           </div>
-          <button type="button" className="btn bg-pokemon-pokeblue text-white" disabled={advisor.isPending} onClick={() => advisor.mutate(id)}>
-            {advisor.isPending ? 'Analyzing…' : 'Ask AI Set Advisor'}
-          </button>
+          {session.data?.isPro ? (
+            <button type="button" className="btn bg-pokemon-pokeblue text-white" disabled={advisor.isPending} onClick={() => advisor.mutate(id)}>
+              {advisor.isPending ? 'Analyzing…' : 'Ask AI Set Advisor'}
+            </button>
+          ) : (
+            <Link to="/pro" className="btn bg-pokemon-pokeblue text-white">Unlock AI with Pro</Link>
+          )}
         </div>
         {advisor.data && (
           <div className="rounded-xl bg-slate-50 p-4">
