@@ -71,7 +71,7 @@ public sealed class BestBuyInventoryProvider(
                 var lowStock = hit.LowStock;
                 listings.Add(new InventoryListing(
                     Retailer,
-                    store.StoreId,
+                    store.StoreId.ToString(CultureInfo.InvariantCulture),
                     store.Name,
                     store.Address,
                     store.City,
@@ -123,7 +123,7 @@ public sealed class BestBuyInventoryProvider(
         var response = await http.GetFromJsonAsync<BestBuyStoresResponse>(path, cancellationToken)
             ?? throw new InvalidOperationException("Best Buy stores response was empty.");
         return response.Stores
-            .Where(s => !string.IsNullOrWhiteSpace(s.StoreId) && s.Lat is >= -90 and <= 90 && s.Lng is >= -180 and <= 180)
+            .Where(s => s.StoreId > 0 && s.Lat is >= -90 and <= 90 && s.Lng is >= -180 and <= 180)
             .Where(s => DistanceMiles(query.Latitude, query.Longitude, s.Lat, s.Lng) <= query.RadiusMiles)
             .ToList();
     }
