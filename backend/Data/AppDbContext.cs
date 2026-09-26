@@ -1,3 +1,5 @@
+using Microsoft.AspNetCore.DataProtection.EntityFrameworkCore;
+using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 
 namespace PokemonTCG.API.Data
@@ -13,6 +15,12 @@ namespace PokemonTCG.API.Data
         public string? Rarity { get; set; }
         public string? ImageSmall { get; set; }
         public string? TcgplayerUrl { get; set; }
+        public string? ImageLarge { get; set; }
+        public string? Hp { get; set; }
+        public string[] Types { get; set; } = [];
+        public string? FlavorText { get; set; }
+        /// <summary>The matching TCGplayer product, once the TCGplayer catalog has been matched.</summary>
+        public int? TcgplayerProductId { get; set; }
 
         // Attributes the price model learns from (see Pricing/Predictions).
         public string? Supertype { get; set; }
@@ -125,9 +133,19 @@ namespace PokemonTCG.API.Data
         public string Reasons { get; set; } = "[]";
     }
 
-    public class AppDbContext : DbContext
+    /// <summary>
+    /// The catalog, prices, predictions, and collectors' collections. Identity supplies the users table (users only,
+    /// no roles), and ASP.NET Core Data Protection keeps its keys here so sign-ins survive container restarts.
+    /// </summary>
+    public class AppDbContext : IdentityUserContext<AppUser, Guid>, IDataProtectionKeyContext
     {
         public AppDbContext(DbContextOptions<AppDbContext> options) : base(options) { }
+
+        public DbSet<CardSet> Sets => Set<CardSet>();
+        public DbSet<LatestPrice> LatestPrices => Set<LatestPrice>();
+        public DbSet<CollectionItem> CollectionItems => Set<CollectionItem>();
+        public DbSet<WishlistItem> WishlistItems => Set<WishlistItem>();
+        public DbSet<Microsoft.AspNetCore.DataProtection.EntityFrameworkCore.DataProtectionKey> DataProtectionKeys => Set<Microsoft.AspNetCore.DataProtection.EntityFrameworkCore.DataProtectionKey>();
 
         public DbSet<Card> Cards => Set<Card>();
         public DbSet<PriceSnapshot> PriceSnapshots => Set<PriceSnapshot>();
@@ -137,6 +155,81 @@ namespace PokemonTCG.API.Data
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
+            base.OnModelCreating(modelBuilder);
+            modelBuilder.Entity<AppUser>(user =>
+            {
+                user.ToTable("users");
+                user.Property(u => u.IsGuest).HasColumnName("is_guest");
+                user.Property(u => u.CreatedAt).HasColumnName("created_at");
+            });
+            modelBuilder.Entity<Microsoft.AspNetCore.Identity.IdentityUserClaim<Guid>>().ToTable("user_claims");
+            modelBuilder.Entity<Microsoft.AspNetCore.Identity.IdentityUserLogin<Guid>>().ToTable("user_logins");
+            modelBuilder.Entity<Microsoft.AspNetCore.Identity.IdentityUserToken<Guid>>().ToTable("user_tokens");
+            modelBuilder.Entity<Microsoft.AspNetCore.DataProtection.EntityFrameworkCore.DataProtectionKey>().ToTable("data_protection_keys");
+
+            modelBuilder.Entity<CardSet>(set =>
+            {
+                set.ToTable("sets");
+                set.Property(s => s.Id).HasColumnName("id").HasMaxLength(64);
+                set.Property(s => s.Name).HasColumnName("name").HasMaxLength(200);
+                set.Property(s => s.Series).HasColumnName("series").HasMaxLength(100);
+                set.Property(s => s.PrintedTotal).HasColumnName("printed_total");
+                set.Property(s => s.Total).HasColumnName("total");
+                set.Property(s => s.ReleaseDate).HasColumnName("release_date");
+                set.Property(s => s.LogoUrl).HasColumnName("logo_url").HasMaxLength(500);
+                set.Property(s => s.SymbolUrl).HasColumnName("symbol_url").HasMaxLength(500);
+                set.Property(s => s.TcgplayerGroupId).HasColumnName("tcgplayer_group_id");
+            });
+
+            modelBuilder.Entity<LatestPrice>(price =>
+            {
+                price.ToTable("latest_prices");
+                price.HasKey(p => new { p.CardId, p.Variant });
+                price.Property(p => p.CardId).HasColumnName("card_id").HasMaxLength(64);
+                price.Property(p => p.Variant).HasColumnName("variant").HasMaxLength(40);
+                price.Property(p => p.Market).HasColumnName("market").HasPrecision(12, 2);
+                price.Property(p => p.Low).HasColumnName("low").HasPrecision(12, 2);
+                price.Property(p => p.Mid).HasColumnName("mid").HasPrecision(12, 2);
+                price.Property(p => p.High).HasColumnName("high").HasPrecision(12, 2);
+                price.Property(p => p.UpdatedOn).HasColumnName("updated_on");
+                price.HasOne<Card>().WithMany().HasForeignKey(p => p.CardId).OnDelete(DeleteBehavior.Cascade);
+            });
+
+            modelBuilder.Entity<CollectionItem>(item =>
+            {
+                item.ToTable("collection_items");
+                item.Property(i => i.Id).HasColumnName("id");
+                item.Property(i => i.UserId).HasColumnName("user_id");
+                item.Property(i => i.CardId).HasColumnName("card_id").HasMaxLength(64);
+                item.Property(i => i.Variant).HasColumnName("variant").HasMaxLength(40);
+                item.Property(i => i.Condition).HasColumnName("condition").HasConversion<string>().HasMaxLength(20);
+                item.Property(i => i.Quantity).HasColumnName("quantity");
+                item.Property(i => i.CostEach).HasColumnName("cost_each").HasPrecision(12, 2);
+                item.Property(i => i.AcquiredOn).HasColumnName("acquired_on");
+                item.Property(i => i.Notes).HasColumnName("notes").HasMaxLength(500);
+                item.Property(i => i.AddedAt).HasColumnName("added_at");
+                item.Property(i => i.UpdatedAt).HasColumnName("updated_at");
+                // One row per printing and condition; adding more copies raises the quantity.
+                item.HasIndex(i => new { i.UserId, i.CardId, i.Variant, i.Condition }).IsUnique();
+                item.HasOne<AppUser>().WithMany().HasForeignKey(i => i.UserId).OnDelete(DeleteBehavior.Cascade);
+                item.HasOne<Card>().WithMany().HasForeignKey(i => i.CardId).OnDelete(DeleteBehavior.Restrict);
+                item.ToTable(t => t.HasCheckConstraint("ck_collection_items_quantity", "quantity > 0"));
+            });
+
+            modelBuilder.Entity<WishlistItem>(item =>
+            {
+                item.ToTable("wishlist_items");
+                item.Property(i => i.Id).HasColumnName("id");
+                item.Property(i => i.UserId).HasColumnName("user_id");
+                item.Property(i => i.CardId).HasColumnName("card_id").HasMaxLength(64);
+                item.Property(i => i.Variant).HasColumnName("variant").HasMaxLength(40);
+                item.Property(i => i.TargetPrice).HasColumnName("target_price").HasPrecision(12, 2);
+                item.Property(i => i.AddedAt).HasColumnName("added_at");
+                item.HasIndex(i => new { i.UserId, i.CardId }).IsUnique();
+                item.HasOne<AppUser>().WithMany().HasForeignKey(i => i.UserId).OnDelete(DeleteBehavior.Cascade);
+                item.HasOne<Card>().WithMany().HasForeignKey(i => i.CardId).OnDelete(DeleteBehavior.Restrict);
+            });
+
             modelBuilder.Entity<Card>(card =>
             {
                 card.ToTable("cards");
@@ -155,6 +248,11 @@ namespace PokemonTCG.API.Data
                 card.Property(c => c.SetSeries).HasColumnName("set_series").HasMaxLength(100);
                 card.Property(c => c.SetReleased).HasColumnName("set_released");
                 card.Property(c => c.SetPrintedTotal).HasColumnName("set_printed_total");
+                card.Property(c => c.ImageLarge).HasColumnName("image_large").HasMaxLength(500);
+                card.Property(c => c.Hp).HasColumnName("hp").HasMaxLength(10);
+                card.Property(c => c.Types).HasColumnName("types");
+                card.Property(c => c.FlavorText).HasColumnName("flavor_text").HasMaxLength(1000);
+                card.Property(c => c.TcgplayerProductId).HasColumnName("tcgplayer_product_id");
                 card.HasIndex(c => c.SetId);
             });
 

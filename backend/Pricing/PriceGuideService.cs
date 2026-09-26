@@ -9,21 +9,23 @@ namespace PokemonTCG.API.Pricing;
 /// API (cached, so repeat visits don't hit it); price history, movers and the
 /// most valuable cards come from the daily snapshots in Postgres.
 /// </summary>
-public class PriceGuideService(PokemonTcgClient client, AppDbContext db, HybridCache cache, TimeProvider clock)
+public class PriceGuideService(PokemonTcgClient client, AppDbContext db, HybridCache cache, TimeProvider clock, CatalogReader catalog)
 {
     private static readonly HybridCacheEntryOptions Hours12 = new() { Expiration = TimeSpan.FromHours(12) };
     private static readonly HybridCacheEntryOptions Hour = new() { Expiration = TimeSpan.FromHours(1) };
     private static readonly HybridCacheEntryOptions Minutes10 = new() { Expiration = TimeSpan.FromMinutes(10) };
 
-    public Task<IReadOnlyList<SetSummary>> GetSetsAsync(CancellationToken cancellationToken) =>
-        cache.GetOrCreateAsync<IReadOnlyList<SetSummary>>(
+    // Sets, cards and search read the local catalog first (filled by the daily snapshot) and only go to the card
+    // database for what the catalog doesn't have yet, such as a fresh install before its first snapshot.
+    public async Task<IReadOnlyList<SetSummary>> GetSetsAsync(CancellationToken cancellationToken) =>
+        await catalog.GetSetsAsync(cancellationToken) ?? await cache.GetOrCreateAsync<IReadOnlyList<SetSummary>>(
             "sets",
             async ct => (await client.GetSetsAsync(ct)).Select(SetSummary.From).ToList(),
             Hours12,
-            cancellationToken: cancellationToken).AsTask();
+            cancellationToken: cancellationToken);
 
     public async Task<SetDetail?> GetSetAsync(string setId, CancellationToken cancellationToken) =>
-        await cache.GetOrCreateAsync(
+        await catalog.GetSetAsync(setId, cancellationToken) ?? await cache.GetOrCreateAsync(
             $"set:{setId}",
             async ct =>
             {
@@ -48,16 +50,22 @@ public class PriceGuideService(PokemonTcgClient client, AppDbContext db, HybridC
 
     public async Task<CardDetail?> GetCardAsync(string cardId, CancellationToken cancellationToken)
     {
-        var card = await cache.GetOrCreateAsync(
-            $"card:{cardId}", async ct => await client.GetCardAsync(cardId, ct), Hour, cancellationToken: cancellationToken);
-        if (card is null) return null;
-
         var since = Today().AddDays(-365);
-        var history = await db.PriceSnapshots.AsNoTracking()
-            .Where(s => s.CardId == card.Id && s.Date >= since)
+        Task<List<PricePoint>> History(string id) => db.PriceSnapshots.AsNoTracking()
+            .Where(s => s.CardId == id && s.Date >= since)
             .OrderBy(s => s.Date)
             .Select(s => new PricePoint(s.Date, s.Variant, s.Market))
             .ToListAsync(cancellationToken);
+
+        if (await catalog.GetCardAsync(cardId, cancellationToken) is { } local)
+        {
+            return local with { History = await History(cardId) };
+        }
+
+        var card = await cache.GetOrCreateAsync(
+            $"card:{cardId}", async ct => await client.GetCardAsync(cardId, ct), Hour, cancellationToken: cancellationToken);
+        if (card is null) return null;
+        var history = await History(card.Id);
 
         var prices = (card.Tcgplayer?.Prices ?? new Dictionary<string, TcgPrice>())
             .OrderBy(p => Prices.VariantOrder(p.Key))
@@ -71,7 +79,7 @@ public class PriceGuideService(PokemonTcgClient client, AppDbContext db, HybridC
     }
 
     public async Task<SearchResults> SearchAsync(string query, int page, int pageSize, CancellationToken cancellationToken) =>
-        await cache.GetOrCreateAsync(
+        await catalog.SearchAsync(query, page, pageSize, cancellationToken) ?? await cache.GetOrCreateAsync(
             $"search:{query.ToLowerInvariant()}:{page}:{pageSize}",
             async ct =>
             {

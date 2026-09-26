@@ -68,6 +68,7 @@ builder.Services.AddHybridCache();
 
 builder.Services.AddSingleton(builder.Configuration.GetSection(SnapshotOptions.SectionName).Get<SnapshotOptions>() ?? new());
 builder.Services.AddScoped<PriceSnapshotService>();
+builder.Services.AddScoped<CatalogReader>();
 builder.Services.AddScoped<PriceGuideService>();
 builder.Services.AddSingleton(builder.Configuration.GetSection(PredictionOptions.SectionName).Get<PredictionOptions>() ?? new());
 builder.Services.AddScoped<PredictionService>();
