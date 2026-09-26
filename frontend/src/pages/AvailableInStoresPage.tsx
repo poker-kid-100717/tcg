@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { useNearbyInventory, useSession } from '../api/hooks';
 import { ErrorState, Loading } from '../components/States';
 import { formatPrice } from '../lib/format';
+import { STORE_PREVIEW } from '../lib/storePreview';
 
 type Coordinates = { latitude: number; longitude: number };
 
@@ -112,6 +113,20 @@ export default function AvailableInStoresPage() {
           </p>
         </div>
       </header>
+
+      {STORE_PREVIEW && (
+        <section className="panel grid gap-3 border-pokemon-blue/30 bg-blue-50/40 p-5 sm:grid-cols-[1fr_auto] sm:items-center">
+          <div>
+            <p className="eyebrow">Local card stores — proposed next source</p>
+            <h2 className="mt-1 text-xl">Verified shop inventory could send nearby collectors directly to local stores.</h2>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
+              The concept is not limited to national retailers. A participating shop could publish verified sealed-product
+              inventory, store details and freshness timestamps so collectors searching nearby can choose the local option.
+            </p>
+          </div>
+          <Link to="/feedback" className="btn justify-self-start bg-pokemon-pokeblue text-white">Would this help your store?</Link>
+        </section>
+      )}
 
       <section className="panel grid gap-5 p-5">
         <div className="flex flex-wrap items-end gap-4">
