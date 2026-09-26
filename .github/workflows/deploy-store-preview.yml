@@ -1,0 +1,84 @@
+name: deploy-store-preview
+
+on:
+  push:
+    branches: [store-preview]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tcg-cloudflare-store-preview
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: |
+            package-lock.json
+            frontend/package-lock.json
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          npm ci --prefix frontend
+
+      - name: Build frontend
+        run: npm run build:frontend
+        env:
+          CI: true
+
+      - name: Deploy isolated feedback preview
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: deploy --config wrangler.store-preview.jsonc
+          secrets: |
+            TCG_DATABASE_URL
+        env:
+          TCG_DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+      - name: Upload optional non-billing provider secrets
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          TCG_POKEMONTCG_API_KEY: ${{ secrets.POKEMONTCG_API_KEY }}
+          TCG_SCRYDEX_API_KEY: ${{ secrets.SCRYDEX_API_KEY }}
+          TCG_SCRYDEX_TEAM_ID: ${{ secrets.SCRYDEX_TEAM_ID }}
+          TCG_BESTBUY_API_KEY: ${{ secrets.BESTBUY_API_KEY }}
+        run: |
+          set -euo pipefail
+
+          put_if_present() {
+            name="$1"
+            value="$2"
+            if [ -n "$value" ]; then
+              printf '%s' "$value" | npx wrangler secret put "$name" --config wrangler.store-preview.jsonc
+            fi
+          }
+
+          put_if_present TCG_POKEMONTCG_API_KEY "$TCG_POKEMONTCG_API_KEY"
+          put_if_present TCG_SCRYDEX_API_KEY "$TCG_SCRYDEX_API_KEY"
+          put_if_present TCG_SCRYDEX_TEAM_ID "$TCG_SCRYDEX_TEAM_ID"
+          put_if_present TCG_BESTBUY_API_KEY "$TCG_BESTBUY_API_KEY"
+
+      - name: Verify store preview
+        shell: bash
+        run: |
+          set -euo pipefail
+          SITE="https://preview.tcg-portfolio-sample.app"
+
+          curl --fail --silent --show-error --retry 12 --retry-delay 10 --retry-all-errors "$SITE/health" | grep -q Healthy
+          curl --fail --silent --show-error "$SITE/feedback" | grep -q '<div id="root">'
+          curl --fail --silent --show-error "$SITE/available-in-stores" | grep -q '<div id="root">'
+          curl --fail --silent --show-error --retry 3 --retry-delay 10 "$SITE/api/sets" | grep -q '"releaseDate"'
