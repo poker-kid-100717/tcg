@@ -259,16 +259,16 @@ public static class ProductEndpoints
         {
             var user = await sessions.GetOrCreateAsync(context, ct);
             var account = await entitlements.GetAccountAsync(user.Id, ct);
-            if (!account.BillingConfigured)
-                return Results.Problem(statusCode: 503, title: "Billing is in preview mode", detail: "Stripe keys and Price IDs have not been configured yet.");
-
             if (request.Plan is not ("monthly" or "annual" or "storefinder" or "complete"))
                 return Results.ValidationProblem(new Dictionary<string, string[]> { ["plan"] = ["Choose a supported subscription plan."] });
+
+            if (request.Plan is "monthly" or "annual" && !account.BillingConfigured)
+                return Results.Problem(statusCode: 503, title: "Pro billing is not configured yet.");
 
             if (request.Plan == "storefinder" && !account.StoreFinderBillingConfigured)
                 return Results.Problem(statusCode: 503, title: "Store Finder billing is not configured yet.");
 
-            if (request.Plan == "complete" && string.IsNullOrWhiteSpace(options.CompleteMonthlyPriceId))
+            if (request.Plan == "complete" && (!options.StripeConfigured || string.IsNullOrWhiteSpace(options.CompleteMonthlyPriceId)))
                 return Results.Problem(statusCode: 503, title: "Complete plan billing is not configured yet.");
 
             var subscription = await store.GetSubscriptionAsync(user.Id, ct);
