@@ -19,16 +19,32 @@ public sealed class StripeBillingService(
         CancellationToken cancellationToken)
     {
         EnsureConfigured();
-        var normalized = plan.Equals("annual", StringComparison.OrdinalIgnoreCase) ? "annual" :
-            plan.Equals("monthly", StringComparison.OrdinalIgnoreCase) ? "monthly" :
-            throw new ArgumentException("Plan must be monthly or annual.", nameof(plan));
-        var priceId = normalized == "annual" ? options.ProAnnualPriceId : options.ProMonthlyPriceId;
+        var normalized = plan.ToLowerInvariant() switch
+        {
+            "monthly" => "monthly",
+            "annual" => "annual",
+            "storefinder" => "storefinder",
+            "complete" => "complete",
+            _ => throw new ArgumentException("Unknown subscription plan.", nameof(plan)),
+        };
+        var priceId = normalized switch
+        {
+            "annual" => options.ProAnnualPriceId,
+            "storefinder" => options.StoreFinderMonthlyPriceId,
+            "complete" => options.CompleteMonthlyPriceId,
+            _ => options.ProMonthlyPriceId,
+        };
+        if (string.IsNullOrWhiteSpace(priceId))
+            throw new InvalidOperationException($"Stripe price for {normalized} is not configured.");
+
         var site = options.SiteUrl.TrimEnd('/');
 
         var fields = new Dictionary<string, string>
         {
             ["mode"] = "subscription",
-            ["success_url"] = $"{site}/dashboard?checkout=success",
+            ["success_url"] = normalized is "storefinder" or "complete"
+                ? $"{site}/available-in-stores?checkout=success"
+                : $"{site}/dashboard?checkout=success",
             ["cancel_url"] = $"{site}/pro?checkout=cancelled",
             ["client_reference_id"] = userId.ToString(),
             ["line_items[0][price]"] = priceId,
