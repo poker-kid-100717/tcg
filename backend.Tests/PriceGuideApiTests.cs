@@ -224,6 +224,8 @@ namespace PokemonTcgMarketplace.Backend.Tests
                 var response = await fixture.CreateClient().PostAsync("/internal/snapshots", null);
                 var result = (await response.Content.ReadFromJsonAsync<SnapshotResult>(Json))!;
                 Assert.Equal(SnapshotStatus.Failed, result.Status);
+                // The first page's rows were rolled back with the rest, so the run doesn't claim them.
+                Assert.Equal((0, 0), (result.CardsSeen, result.PricesWritten));
             }
             finally
             {

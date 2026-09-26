@@ -21,8 +21,11 @@ public class PredictionService(AppDbContext db, PredictionOptions options, TimeP
     /// <summary>A card's outcome is its first price on or up to this many days after the horizon date.</summary>
     private const int OutcomeGraceDays = 5;
 
-    /// <summary>A printing's prediction starts from its most recent price within this many days of the latest snapshot.</summary>
-    private const int CurrentWindowDays = 7;
+    /// <summary>
+    /// A snapshot stamps each price with TCGplayer's own update date, so a printing's price on a given day is its latest
+    /// one from up to this many days before. Every sample day (the latest included) is built from those prices.
+    /// </summary>
+    private const int CarryForwardDays = 7;
 
     public async Task<PredictionRunResult?> RunAsync(CancellationToken cancellationToken)
     {
@@ -50,6 +53,9 @@ public class PredictionService(AppDbContext db, PredictionOptions options, TimeP
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             logger.LogError(ex, "Prediction run {RunId} failed", run.Id);
+            // Whatever this run staged was rolled back (or never saved), so don't save it now either.
+            foreach (var entry in db.ChangeTracker.Entries<PricePrediction>().ToList()) entry.State = EntityState.Detached;
+            run.Predictions = 0;
             run.Status = PredictionStatus.Failed;
             run.Message = ex.Message.Length > 2000 ? ex.Message[..2000] : ex.Message;
         }
@@ -94,24 +100,20 @@ public class PredictionService(AppDbContext db, PredictionOptions options, TimeP
         // outcome was already known before validation starts, so no outcome leaks across the split.
         var dates = new List<DateOnly>();
         for (var d = latest.Value; d >= earliest.Value; d = d.AddDays(-options.SampleEveryDays)) dates.Add(d);
-        // Predictions start from each printing's most recent price in the last week: a snapshot stamps rows with
-        // TCGplayer's own update date, so not every printing in a complete run carries the newest date.
-        var currentFrom = latest.Value.AddDays(-(CurrentWindowDays - 1));
-        for (var d = currentFrom; d < latest.Value; d = d.AddDays(1)) if (!dates.Contains(d)) dates.Add(d);
         dates.Sort();
         // A date is labelled only once its whole outcome window (horizon + grace days) has passed, so printings
         // that get their outcome price during the grace days aren't missing from the newest validation dates.
-        var labelled = dates.Where(d => d < currentFrom && d.AddDays(horizon + OutcomeGraceDays) <= latest.Value).ToList();
+        var labelled = dates.Where(d => d.AddDays(horizon + OutcomeGraceDays) <= latest.Value).ToList();
         var validationDates = labelled.TakeLast(Math.Max(1, (int)Math.Ceiling(labelled.Count * options.ValidationFraction))).ToHashSet();
         var validationStart = validationDates.Count > 0 ? validationDates.Min() : latest.Value;
         // A label can come from up to OutcomeGraceDays after the horizon (when a card has no price on the exact day),
         // so a training date's whole outcome window has to close before validation starts.
         var trainingDates = labelled.Where(d => d.AddDays(horizon + OutcomeGraceDays) <= validationStart).ToHashSet();
 
-        // Cap rows per day in the database, so memory stays bounded however much history there is. The last week
-        // is never capped: every printing in it gets a prediction.
+        // Cap rows per day in the database, so memory stays bounded however much history there is. The latest day
+        // is never capped: every printing priced in the last week gets a prediction.
         var perDay = Math.Max(1, options.MaxTrainingRows / Math.Max(1, labelled.Count));
-        var samples = await LoadSamplesAsync(dates.ToArray(), currentFrom, perDay, cancellationToken);
+        var samples = await LoadSamplesAsync(dates.ToArray(), latest.Value, perDay, cancellationToken);
         var species = await LoadSpeciesAsync(cancellationToken);
         ModelInput Input(SampleRow s) => new()
         {
@@ -159,10 +161,9 @@ public class PredictionService(AppDbContext db, PredictionOptions options, TimeP
         // 2. It works: retrain on everything with a known outcome and predict from the latest prices.
         var final = PriceModel.Train(samples.Where(s => s.Label is not null && labelled.Contains(s.Date)).Select(Input).ToList(), options);
         run.Importance = ImportanceJson(final.Importance());
-        var current = samples.Where(s => s.Date >= currentFrom)
-            .GroupBy(s => (s.CardId, s.Variant))
-            .Select(g => g.MaxBy(s => s.Date)!)
-            .ToList();
+        // Every current row is as of the latest day, so each prediction is for HorizonDays after run.AsOf,
+        // which is what the API shows and what scoring checks.
+        var current = samples.Where(s => s.Date == latest.Value).ToList();
         var outputs = final.Predict(current.Select(Input).ToList());
 
         var predictions = current.Zip(outputs, (s, o) => ToPrediction(run, s, o, species)).ToList();
@@ -171,15 +172,18 @@ public class PredictionService(AppDbContext db, PredictionOptions options, TimeP
             cancellationToken);
         db.PricePredictions.AddRange(predictions);
         run.Predictions = predictions.Count;
-        // Published and finished in one save: a run is never left published but unfinished (and so never served).
+
+        // Publishing and clearing out older runs' predictions (keeping only the weekly checkpoints still waiting to
+        // be scored) is one transaction: the run is never left published with a failed cleanup behind it, nor
+        // marked failed after its predictions were already committed and served.
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         run.Status = PredictionStatus.Published;
         run.FinishedAt = clock.GetUtcNow();
         await db.SaveChangesAsync(cancellationToken);
-
-        // Older runs' predictions aren't shown any more; keep only the weekly checkpoints still waiting to be scored.
         await db.PricePredictions
             .Where(p => p.RunId != run.Id && db.PredictionRuns.Any(r => r.Id == p.RunId && !r.Checkpoint))
             .ExecuteDeleteAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
     }
 
     private PricePrediction ToPrediction(PredictionRun run, SampleRow row, ModelOutput output, IReadOnlyDictionary<int, Species> species)
@@ -261,6 +265,7 @@ public class PredictionService(AppDbContext db, PredictionOptions options, TimeP
         var horizon = options.HorizonDays;
         var grace = OutcomeGraceDays;
         var minPrice = options.MinPrice;
+        var carry = CarryForwardDays;
         return db.Database.SqlQuery<SampleRow>($"""
             WITH sample_dates AS (SELECT unnest({dates}) AS d),
             daily AS (
@@ -270,7 +275,7 @@ public class PredictionService(AppDbContext db, PredictionOptions options, TimeP
                        ln(s.market)::float8 AS y
                 FROM price_snapshots s
                 WHERE s.market > 0
-                  AND s.date >= (SELECT min(d) FROM sample_dates) - 31
+                  AND s.date >= (SELECT min(d) FROM sample_dates) - 31 - {carry}
                   AND s.date <= (SELECT max(d) FROM sample_dates)
             ),
             windowed AS (
@@ -279,12 +284,21 @@ public class PredictionService(AppDbContext db, PredictionOptions options, TimeP
                 FROM daily
                 WINDOW w AS (PARTITION BY card_id, variant ORDER BY date RANGE BETWEEN INTERVAL '30 days' PRECEDING AND CURRENT ROW)
             ),
+            -- Each printing's latest known price as of each sample day. Upstream stamps prices with its own update
+            -- date, so a day's exact-date rows are only part of the market; ranks, shares and premiums below are
+            -- computed over every printing's as-of price instead.
+            as_of AS (
+                SELECT DISTINCT ON (sd.d, w.card_id, w.variant)
+                       w.card_id, w.variant, sd.d AS date, w.market, w.low, w.mid, w.high, w.vol30, w.slope30, w.fit30
+                FROM sample_dates sd
+                JOIN windowed w ON w.date <= sd.d AND w.date > sd.d - {carry}
+                ORDER BY sd.d, w.card_id, w.variant, w.date DESC
+            ),
             ranked AS (
                 SELECT w.*, c.set_id, c.rarity, c.national_dex, c.artist, ln(w.market)::float8 AS lp,
                        rank() OVER (PARTITION BY w.date, c.set_id ORDER BY w.market DESC) AS set_rank,
                        w.market / sum(w.market) OVER (PARTITION BY w.date, c.set_id) AS set_share
-                FROM windowed w
-                JOIN sample_dates sd ON sd.d = w.date
+                FROM as_of w
                 JOIN cards c ON c.id = w.card_id
                 WHERE w.market >= {minPrice}
             ),
