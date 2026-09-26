@@ -83,18 +83,25 @@ public class PriceSnapshotService(
 
             var cutoff = today.AddDays(-options.RetentionDays);
             await db.PriceSnapshots.Where(s => s.Date < cutoff).ExecuteDeleteAsync(cancellationToken);
-            await transaction.CommitAsync(cancellationToken);
 
+            // The run's success commits with its data: a crash after the commit can't leave complete prices behind a
+            // run still marked Running (which would hold back the prediction refresh).
             run.Status = SnapshotStatus.Succeeded;
+            run.FinishedAt = clock.GetUtcNow();
+            await db.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             logger.LogError(ex, "Price snapshot run {RunId} failed after {Cards} cards", run.Id, run.CardsSeen);
+            // Everything written was rolled back, so nothing was recorded.
+            run.CardsSeen = 0;
+            run.PricesWritten = 0;
             run.Status = SnapshotStatus.Failed;
             run.Error = ex.Message.Length > 2000 ? ex.Message[..2000] : ex.Message;
         }
 
-        run.FinishedAt = clock.GetUtcNow();
+        run.FinishedAt ??= clock.GetUtcNow();
         await db.SaveChangesAsync(CancellationToken.None);
         logger.LogInformation("Price snapshot run {RunId} {Status}: {Cards} cards, {Prices} prices",
             run.Id, run.Status, run.CardsSeen, run.PricesWritten);
