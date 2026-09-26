@@ -5,6 +5,7 @@ import { useMovers, useSets, useTopCards } from '../api/hooks';
 import { CardTile } from '../components/CardTile';
 import { MoversTable } from '../components/MoversTable';
 import { formatDate } from '../lib/format';
+import { STORE_PREVIEW } from '../lib/storePreview';
 
 export default function HomePage() {
   const navigate = useNavigate();
@@ -32,6 +33,14 @@ export default function HomePage() {
             TCG Signal combines card pricing, history, market confidence, sold comps when available, watch alerts,
             deal math, and a validated price outlook. Start with the card; then inspect the evidence behind the number.
           </p>
+          {STORE_PREVIEW && (
+            <div className="max-w-3xl rounded-xl border border-white/15 bg-white/10 p-4 text-sm leading-6 text-white/90">
+              <strong className="text-pokemon-yellow">For local card-store feedback:</strong>{' '}
+              try the product as a collector would, then tell me what solves a real problem, what you would not trust,
+              and whether verified local-store inventory would be useful to your customers.{' '}
+              <Link to="/feedback" className="font-bold text-white underline underline-offset-2">Feedback questions →</Link>
+            </div>
+          )}
           <form role="search" onSubmit={submit} className="flex max-w-xl gap-2">
             <label htmlFor="hero-search" className="sr-only">
               Search cards
