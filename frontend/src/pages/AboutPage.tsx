@@ -1,7 +1,7 @@
 const layers = [
   { name: 'React + Vite', note: 'Set guide, card pages and search; TanStack Query caches API responses in the browser' },
   { name: 'Cloudflare Worker', note: 'Serves the site, forwards /api to the container, and runs the daily price snapshot on a Cron Trigger' },
-  { name: 'ASP.NET Core 10 API', note: 'Cloudflare Container; proxies and caches the Pokémon TCG API and serves price history' },
+  { name: 'ASP.NET Core 10 API', note: 'Cloudflare Container; proxies and caches the Pokémon TCG API, serves price history, and trains the ML.NET price model daily' },
   { name: 'PostgreSQL (Neon)', note: 'Daily TCGplayer price snapshots per card and printing, for history, movers, trends and sleepers' },
 ];
 
@@ -25,6 +25,11 @@ const decisions = [
     choice: 'Each page of prices is written with one bulk upsert per table (Postgres unnest)',
     instead: 'saving tens of thousands of rows through the ORM one by one',
     why: 'A run covers every card in 250-card pages, so a few dozen statements write the whole day. Snapshots are keyed by card, printing and day, which makes rerunning a day safe: it overwrites instead of duplicating.',
+  },
+  {
+    choice: 'Price predictions come from a model trained on the recorded prices (ML.NET gradient-boosted trees), and are only shown when they beat “no change”',
+    instead: 'asking a language model to guess, or publishing whatever a model outputs',
+    why: 'The model learns from each card’s price history and what the card is: the Pokémon and how its cards sell, rarity, printing, set age and size, rank in its set, artist, and how listings compare with sales. It is tested on the most recent weeks it never trained on, and its predictions stay hidden unless it beats simply predicting no change. Each prediction lists the factors that moved it, and once a week’s predictions reach their date they are scored against real prices on the Outlook page.',
   },
 ];
 

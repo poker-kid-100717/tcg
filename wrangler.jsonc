@@ -52,7 +52,7 @@
   ],
   // Record TCGplayer prices once a day (worker/index.ts → scheduled).
   "triggers": {
-    "crons": ["15 11 * * *"]
+    "crons": ["15 11 * * *", "45 11 * * *"]
   },
   "observability": {
     "enabled": true

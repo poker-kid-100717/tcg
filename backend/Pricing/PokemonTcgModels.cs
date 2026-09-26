@@ -56,4 +56,5 @@ public record TcgCard(
     string? Rarity,
     string? FlavorText,
     TcgCardImages? Images,
-    TcgPlayer? Tcgplayer);
+    TcgPlayer? Tcgplayer,
+    IReadOnlyList<int>? NationalPokedexNumbers = null);

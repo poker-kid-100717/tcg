@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 // that's under test here.
 vi.mock("@cloudflare/containers", () => ({ Container: class {} }));
 
-const { default: worker } = await import("./index");
+const { default: worker, PREDICTIONS_CRON } = await import("./index");
 
 function createEnv() {
   const apiRequests: Request[] = [];
@@ -77,5 +77,16 @@ describe("daily price snapshot", () => {
     expect(apiRequests).toHaveLength(1);
     expect(apiRequests[0].method).toBe("POST");
     expect(new URL(apiRequests[0].url).pathname).toBe("/internal/snapshots");
+  });
+
+  it("retrains the price model on the second daily cron", async () => {
+    const { env, apiRequests } = createEnv();
+    const pending: Promise<unknown>[] = [];
+
+    await worker.scheduled({ cron: PREDICTIONS_CRON } as ScheduledController, env, { waitUntil: (p: Promise<unknown>) => pending.push(p) } as any);
+    await Promise.all(pending);
+
+    expect(apiRequests).toHaveLength(1);
+    expect(new URL(apiRequests[0].url).pathname).toBe("/internal/predictions");
   });
 });

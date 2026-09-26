@@ -15,6 +15,8 @@ namespace PokemonTcgMarketplace.Backend.Tests
     {
         public ConcurrentQueue<Uri> Requests { get; } = new();
         public bool Fail { get; set; }
+        /// <summary>When set, every request after this many (counted across the fake's lifetime) fails.</summary>
+        public int? FailAfterRequests { get; set; }
 
         private readonly List<JsonObject> _sets = [];
         private readonly List<JsonObject> _cards = [];
@@ -37,7 +39,7 @@ namespace PokemonTcgMarketplace.Backend.Tests
             var card = new JsonObject
             {
                 ["id"] = id, ["name"] = name, ["supertype"] = "Pokémon", ["subtypes"] = new JsonArray("Basic"), ["hp"] = "70",
-                ["types"] = new JsonArray("Fire"), ["set"] = set.DeepClone(), ["number"] = number, ["artist"] = "Test Artist",
+                ["types"] = new JsonArray("Fire"), ["nationalPokedexNumbers"] = new JsonArray(6), ["set"] = set.DeepClone(), ["number"] = number, ["artist"] = "Test Artist",
                 ["rarity"] = rarity,
                 ["images"] = new JsonObject { ["small"] = $"https://images.test/{id}.png", ["large"] = $"https://images.test/{id}_hires.png" },
             };
@@ -66,7 +68,7 @@ namespace PokemonTcgMarketplace.Backend.Tests
         {
             var uri = request.RequestUri!;
             Requests.Enqueue(uri);
-            if (Fail) return Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
+            if (Fail || Requests.Count > FailAfterRequests) return Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
 
             var path = uri.AbsolutePath.TrimEnd('/');
             var query = System.Web.HttpUtility.ParseQueryString(uri.Query);

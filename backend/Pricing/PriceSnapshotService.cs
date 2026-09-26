@@ -59,6 +59,9 @@ public class PriceSnapshotService(
 
         try
         {
+            // The whole run is one transaction: a run that fails part-way leaves no half-recorded day behind
+            // (the price model and movers would otherwise read it as a complete one).
+            await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
             var today = DateOnly.FromDateTime(clock.GetUtcNow().UtcDateTime);
             for (var page = 1; ; page++)
             {
@@ -75,16 +78,24 @@ public class PriceSnapshotService(
             var cutoff = today.AddDays(-options.RetentionDays);
             await db.PriceSnapshots.Where(s => s.Date < cutoff).ExecuteDeleteAsync(cancellationToken);
 
+            // The run's success commits with its data: a crash after the commit can't leave complete prices behind a
+            // run still marked Running (which would hold back the prediction refresh).
             run.Status = SnapshotStatus.Succeeded;
+            run.FinishedAt = clock.GetUtcNow();
+            await db.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             logger.LogError(ex, "Price snapshot run {RunId} failed after {Cards} cards", run.Id, run.CardsSeen);
+            // Everything written was rolled back, so nothing was recorded.
+            run.CardsSeen = 0;
+            run.PricesWritten = 0;
             run.Status = SnapshotStatus.Failed;
             run.Error = ex.Message.Length > 2000 ? ex.Message[..2000] : ex.Message;
         }
 
-        run.FinishedAt = clock.GetUtcNow();
+        run.FinishedAt ??= clock.GetUtcNow();
         await db.SaveChangesAsync(CancellationToken.None);
         logger.LogInformation("Price snapshot run {RunId} {Status}: {Cards} cards, {Prices} prices",
             run.Id, run.Status, run.CardsSeen, run.PricesWritten);
@@ -98,22 +109,31 @@ public class PriceSnapshotService(
             from card in priced
             from price in card.Tcgplayer!.Prices!
             where price.Value.Market >= options.MinMarketPrice
-            select (card, variant: price.Key, price: price.Value, date: card.Tcgplayer!.Updated ?? today)
+            // Every row is dated the day it was recorded, not the upstream update date: each successful run is then a
+            // complete day of prices, so day-to-day history, returns and per-day aggregates are over every printing.
+            select (card, variant: price.Key, price: price.Value, date: today)
         ).ToList();
         if (rows.Count == 0) return 0;
 
         var tracked = rows.Select(r => r.card).DistinctBy(c => c.Id).ToList();
 
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-
         await db.Database.ExecuteSqlRawAsync(
             """
-            INSERT INTO cards (id, name, number, set_id, set_name, rarity, image_small, tcgplayer_url)
-            SELECT * FROM unnest(@ids, @names, @numbers, @set_ids, @set_names, @rarities, @images, @urls)
+            INSERT INTO cards (id, name, number, set_id, set_name, rarity, image_small, tcgplayer_url,
+                               supertype, subtypes, national_dex, artist, set_series, set_released, set_printed_total)
+            SELECT id, name, number, set_id, set_name, rarity, image_small, tcgplayer_url,
+                   supertype, string_to_array(subtypes, '|'), national_dex, artist, set_series, set_released, set_printed_total
+            FROM unnest(@ids, @names, @numbers, @set_ids, @set_names, @rarities, @images, @urls,
+                        @supertypes, @subtypes, @dex, @artists, @series, @released, @printed)
+                AS t(id, name, number, set_id, set_name, rarity, image_small, tcgplayer_url,
+                     supertype, subtypes, national_dex, artist, set_series, set_released, set_printed_total)
             ON CONFLICT (id) DO UPDATE SET
                 name = excluded.name, number = excluded.number, set_id = excluded.set_id,
                 set_name = excluded.set_name, rarity = excluded.rarity,
-                image_small = excluded.image_small, tcgplayer_url = excluded.tcgplayer_url
+                image_small = excluded.image_small, tcgplayer_url = excluded.tcgplayer_url,
+                supertype = excluded.supertype, subtypes = excluded.subtypes, national_dex = excluded.national_dex,
+                artist = excluded.artist, set_series = excluded.set_series, set_released = excluded.set_released,
+                set_printed_total = excluded.set_printed_total
             """,
             [
                 Text("ids", tracked.Select(c => c.Id)),
@@ -124,6 +144,15 @@ public class PriceSnapshotService(
                 Text("rarities", tracked.Select(c => c.Rarity)),
                 Text("images", tracked.Select(c => c.Images?.Small)),
                 Text("urls", tracked.Select(c => c.Tcgplayer?.Url)),
+                Text("supertypes", tracked.Select(c => c.Supertype)),
+                // unnest can't take a jagged array, so subtypes travel as one delimited string per card.
+                Text("subtypes", tracked.Select(c => string.Join('|', c.Subtypes ?? []))),
+                new NpgsqlParameter("dex", NpgsqlDbType.Array | NpgsqlDbType.Integer)
+                    { Value = tracked.Select(c => c.NationalPokedexNumbers is [var first, ..] ? first : (int?)null).ToArray() },
+                Text("artists", tracked.Select(c => c.Artist)),
+                Text("series", tracked.Select(c => c.Set.Series)),
+                new NpgsqlParameter("released", NpgsqlDbType.Array | NpgsqlDbType.Date) { Value = tracked.Select(c => c.Set.Released).ToArray() },
+                new NpgsqlParameter("printed", NpgsqlDbType.Array | NpgsqlDbType.Integer) { Value = tracked.Select(c => (int?)c.Set.PrintedTotal).ToArray() },
             ],
             cancellationToken);
 
@@ -145,7 +174,6 @@ public class PriceSnapshotService(
             ],
             cancellationToken);
 
-        await transaction.CommitAsync(cancellationToken);
         return rows.Count;
     }
 

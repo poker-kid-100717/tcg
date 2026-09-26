@@ -12,6 +12,7 @@ const CardPage = lazy(() => import('./pages/CardPage'));
 const SearchPage = lazy(() => import('./pages/SearchPage'));
 const MarketPage = lazy(() => import('./pages/MarketPage'));
 const AboutPage = lazy(() => import('./pages/AboutPage'));
+const OutlookPage = lazy(() => import('./pages/OutlookPage'));
 
 export default function App() {
   return (
@@ -25,6 +26,7 @@ export default function App() {
             <Route path="cards/:cardId" element={<CardPage />} />
             <Route path="search" element={<SearchPage />} />
             <Route path="market" element={<MarketPage />} />
+            <Route path="outlook" element={<OutlookPage />} />
             <Route path="about" element={<AboutPage />} />
             <Route path="*" element={<NotFound />} />
           </Route>

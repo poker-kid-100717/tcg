@@ -92,13 +92,22 @@ namespace PokemonTcgMarketplace.Backend.Tests
             fixture.Upstream.AddCard(set, "3", "Bulk", "Common", weekAgo, ("normal", 0.10m));
             fixture.Upstream.AddCard(set, "4", "Steady", "Rare", weekAgo, ("holofoil", 5m));
 
-            var first = await RunSnapshot();
-            Assert.Equal(SnapshotStatus.Succeeded, first.Status);
+            // Record last week's prices a week ago, then today's today.
+            fixture.Clock.Offset = TimeSpan.FromDays(-7);
+            try
+            {
+                var first = await RunSnapshot();
+                Assert.Equal(SnapshotStatus.Succeeded, first.Status);
+            }
+            finally
+            {
+                fixture.Clock.Offset = TimeSpan.Zero;
+            }
 
             fixture.Upstream.SetPrices("mkt1-1", Today, ("holofoil", 25m), ("reverseHolofoil", 12m));
             fixture.Upstream.SetPrices("mkt1-2", Today, ("holofoil", 30m));
             fixture.Upstream.SetPrices("mkt1-3", Today, ("normal", 0.40m));
-            fixture.Upstream.SetPrices("mkt1-4", Today, ("holofoil", 5m));
+            // mkt1-4 isn't updated upstream this week; its price is still recorded for today.
             await RunSnapshot();
             var rerun = await RunSnapshot(); // same day again: overwrites, doesn't duplicate
             Assert.Equal(SnapshotStatus.Succeeded, rerun.Status);
@@ -108,8 +117,19 @@ namespace PokemonTcgMarketplace.Backend.Tests
                 var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
                 var rows = await db.PriceSnapshots.Where(s => s.CardId.StartsWith("mkt1-")).ToListAsync();
                 Assert.Equal(8, rows.Count); // 4 printings over the minimum × 2 days; bulk commons skipped
+                // Rows are dated by the day they were recorded, even when upstream last updated the price earlier.
+                Assert.Equal([weekAgo, Today], rows.Where(r => r.CardId == "mkt1-4").Select(r => r.Date).Order());
                 Assert.DoesNotContain(rows, r => r.CardId == "mkt1-3");
-                Assert.Equal("Riser", (await db.Cards.SingleAsync(c => c.Id == "mkt1-1")).Name);
+                var stored = await db.Cards.SingleAsync(c => c.Id == "mkt1-1");
+                Assert.Equal("Riser", stored.Name);
+                // The attributes the price model learns from are stored with the card.
+                Assert.Equal(6, stored.NationalDex);
+                Assert.Equal("Pokémon", stored.Supertype);
+                Assert.Equal(["Basic"], stored.Subtypes);
+                Assert.Equal("Test Artist", stored.Artist);
+                Assert.Equal("Test Series", stored.SetSeries);
+                Assert.Equal(new DateOnly(2022, 5, 1), stored.SetReleased);
+                Assert.Equal(4, stored.SetPrintedTotal);
             }
 
             var card = await Get<CardDetail>("/api/cards/mkt1-1");
@@ -200,6 +220,33 @@ namespace PokemonTcgMarketplace.Backend.Tests
             Assert.Null(fresh.Change30Percent);
             Assert.True(sleepers.Cards.ToList().IndexOf(quiet) < sleepers.Cards.ToList().IndexOf(fresh));
             Assert.DoesNotContain(sleepers.Cards, c => c.CardId is "slp-moved" or "slp-supplied" or "slp-outlier");
+        }
+
+        [Fact]
+        public async Task A_snapshot_that_fails_part_way_records_nothing()
+        {
+            var set = fixture.Upstream.AddSet("half1", "Half Set", "Test Series", new DateOnly(2021, 1, 1), 300);
+            for (var i = 1; i <= 300; i++) fixture.Upstream.AddCard(set, i.ToString(), $"Half {i}", "Rare", Today, ("holofoil", 5m));
+            var total = fixture.Upstream.Requests.Count;
+            // The first page of cards succeeds, then the card database goes down for good.
+            fixture.Upstream.FailAfterRequests = total + 1;
+            try
+            {
+                var response = await fixture.CreateClient().PostAsync("/internal/snapshots", null);
+                var result = (await response.Content.ReadFromJsonAsync<SnapshotResult>(Json))!;
+                Assert.Equal(SnapshotStatus.Failed, result.Status);
+                // The first page's rows were rolled back with the rest, so the run doesn't claim them.
+                Assert.Equal((0, 0), (result.CardsSeen, result.PricesWritten));
+            }
+            finally
+            {
+                fixture.Upstream.FailAfterRequests = null;
+            }
+
+            using var scope = fixture.Factory.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            Assert.False(await db.PriceSnapshots.AnyAsync(s => s.CardId.StartsWith("half1-")));
+            Assert.False(await db.Cards.AnyAsync(c => c.Id.StartsWith("half1-")));
         }
 
         [Fact]
