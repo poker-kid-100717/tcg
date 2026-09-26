@@ -44,18 +44,16 @@ app.MapGet("/health", async (InventoryStore store, CancellationToken ct) =>
         ? Results.Ok(new { status = "Healthy" })
         : Results.Problem(statusCode: 503, title: "Inventory database unavailable"));
 
-app.MapGet("/api/inventory/nearby", async Task<IResult> (
-    double lat,
-    double lng,
-    int? radius,
+app.MapPost("/api/inventory/nearby", async Task<IResult> (
+    InventoryQuery query,
     InventorySearchService service,
     CancellationToken ct) =>
 {
-    if (lat is < -90 or > 90 || lng is < -180 or > 180)
+    if (query.Latitude is < -90 or > 90 || query.Longitude is < -180 or > 180)
         return Results.ValidationProblem(new Dictionary<string, string[]> { ["location"] = ["A valid latitude and longitude are required."] });
 
-    var miles = Math.Clamp(radius ?? 25, 1, 100);
-    return Results.Ok(await service.SearchAsync(new InventoryQuery(lat, lng, miles), ct));
+    var miles = Math.Clamp(query.RadiusMiles, 1, 100);
+    return Results.Ok(await service.SearchAsync(query with { RadiusMiles = miles }, ct));
 });
 
 app.Run();
