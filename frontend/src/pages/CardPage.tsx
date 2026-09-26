@@ -1,9 +1,12 @@
+import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 
 import { useCard, useCardPredictions } from '../api/hooks';
+import { MarketIntelligencePanel } from '../components/MarketIntelligence';
 import { CardOutlook } from '../components/Predictions';
 import { PriceHistoryChart } from '../components/PriceHistoryChart';
 import { ShopLink } from '../components/ShopLink';
+import { WatchButton } from '../components/WatchButton';
 import { ErrorState, Loading } from '../components/States';
 import { formatDate, formatPrice } from '../lib/format';
 
@@ -11,11 +14,21 @@ export default function CardPage() {
   const { cardId = '' } = useParams();
   const { data: card, isPending, error, refetch } = useCard(cardId);
   const outlook = useCardPredictions(cardId);
+  const [variant, setVariant] = useState('');
+
+  useEffect(() => {
+    if (!card) return;
+    const first = card.prices.find((p) => p.market !== null) ?? card.prices[0];
+    setVariant((current) => current && card.prices.some((p) => p.variant === current) ? current : (first?.variant ?? ''));
+  }, [card?.id]);
 
   if (isPending) return <Loading label="Loading card…" />;
   if (error) return <ErrorState error={error} onRetry={() => refetch()} />;
 
-  const headline = card.prices.find((p) => p.market !== null);
+  const headline =
+    card.prices.find((p) => p.variant === variant) ??
+    card.prices.find((p) => p.market !== null) ??
+    card.prices[0];
   const details: [string, string | null][] = [
     ['Set', card.set.name],
     ['Number', `${card.number} / ${card.set.printedTotal}`],
@@ -71,8 +84,38 @@ export default function CardPage() {
                 <p className="price text-4xl text-slate-900">{formatPrice(headline?.market)}</p>
                 <p className="text-xs text-slate-500">Updated {formatDate(card.pricesUpdated)}</p>
               </div>
-              <ShopLink url={card.tcgplayerUrl} cardName={card.name} />
+              <div className="flex flex-wrap gap-2">
+                <WatchButton
+                  input={{
+                    cardId: card.id,
+                    variant: headline?.variant ?? variant,
+                    cardName: card.name,
+                    setName: card.set.name,
+                    imageUrl: card.imageUrl,
+                    targetBelow: null,
+                    targetAbove: null,
+                    movePercent: 10,
+                  }}
+                />
+                <Link to={`/deal?card=${encodeURIComponent(card.id)}`} className="btn bg-white text-pokemon-pokeblue ring-1 ring-pokemon-pokeblue">
+                  Analyze deal
+                </Link>
+                <ShopLink url={card.tcgplayerUrl} cardName={card.name} />
+              </div>
             </div>
+
+            {card.prices.length > 1 && (
+              <label className="grid max-w-sm gap-1 text-sm font-semibold text-slate-700">
+                Printing to analyze
+                <select className="input" value={headline?.variant ?? variant} onChange={(event) => setVariant(event.target.value)}>
+                  {card.prices.map((price) => (
+                    <option key={price.variant} value={price.variant}>
+                      {price.label} · {formatPrice(price.market)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
 
             {card.prices.length > 0 ? (
               <div className="overflow-x-auto">
@@ -104,6 +147,8 @@ export default function CardPage() {
               <p className="text-sm text-slate-600">TCGplayer doesn&apos;t list a price for this card yet.</p>
             )}
           </section>
+
+          {headline?.variant && <MarketIntelligencePanel cardId={card.id} variant={headline.variant} />}
 
           <section aria-labelledby="history-heading" className="panel grid gap-3 p-5">
             <h2 id="history-heading" className="text-lg">Price history</h2>
