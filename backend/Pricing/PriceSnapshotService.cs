@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using NpgsqlTypes;
 using PokemonTCG.API.Data;
+using PokemonTCG.API.Pricing.Tcgplayer;
 
 namespace PokemonTCG.API.Pricing;
 
@@ -33,6 +34,7 @@ public class PriceSnapshotService(
     AppDbContext db,
     SnapshotOptions options,
     TimeProvider clock,
+    TcgplayerPriceSync tcgplayer,
     ILogger<PriceSnapshotService> logger)
 {
     // One run at a time per process; a second trigger while one is running is refused.
@@ -75,6 +77,9 @@ public class PriceSnapshotService(
                 if (run.CardsSeen >= response.TotalCount) break;
                 await Task.Delay(options.PageDelayMilliseconds, cancellationToken);
             }
+
+            // With TCGplayer keys, the day's prices come straight from TCGplayer (overwriting the copies above).
+            run.PricesWritten += await tcgplayer.SyncAsync(today, cancellationToken);
 
             var cutoff = today.AddDays(-options.RetentionDays);
             await db.PriceSnapshots.Where(s => s.Date < cutoff).ExecuteDeleteAsync(cancellationToken);

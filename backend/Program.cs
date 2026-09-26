@@ -125,6 +125,7 @@ builder.Services.AddRateLimiter(options =>
 });
 
 builder.Services.AddSingleton(builder.Configuration.GetSection(SnapshotOptions.SectionName).Get<SnapshotOptions>() ?? new());
+builder.Services.AddScoped<TcgplayerPriceSync>();
 builder.Services.AddScoped<PriceSnapshotService>();
 builder.Services.AddScoped<CatalogReader>();
 builder.Services.AddScoped<PriceGuideService>();
