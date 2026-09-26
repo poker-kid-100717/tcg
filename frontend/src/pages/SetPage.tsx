@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 
+import { useChecklist, useCollectionActions } from '../api/collection';
 import { useSet } from '../api/hooks';
 import type { CardSummary } from '../api/types';
 import { CardTile } from '../components/CardTile';
@@ -28,7 +29,12 @@ export default function SetPage() {
   const [params, setParams] = useSearchParams();
   const sort = (params.get('sort') as SortKey) in SORTS ? (params.get('sort') as SortKey) : 'number';
   const rarity = params.get('rarity') ?? '';
+  const show = (['owned', 'missing'] as const).find((v) => v === params.get('show')) ?? '';
   const [filter, setFilter] = useState('');
+  const checklist = useChecklist(setId);
+  const { add } = useCollectionActions();
+  const [justAdded, setJustAdded] = useState<string | null>(null);
+  const owned = useMemo(() => new Map((checklist.data?.owned ?? []).map((o) => [o.cardId, o.quantity])), [checklist.data]);
 
   const update = (key: string, value: string) =>
     setParams(
@@ -49,14 +55,21 @@ export default function SetPage() {
     const needle = filter.trim().toLowerCase();
     return (data?.cards ?? [])
       .filter((c) => !rarity || c.rarity === rarity)
+      .filter((c) => !show || (show === 'owned') === owned.has(c.id))
       .filter((c) => !needle || c.name.toLowerCase().includes(needle) || c.number.toLowerCase() === needle)
       .sort(SORTS[sort].compare);
-  }, [data, rarity, filter, sort]);
+  }, [data, rarity, filter, sort, show, owned]);
 
   if (isPending) return <Loading label="Loading set…" />;
   if (error) return <ErrorState error={error} onRetry={() => refetch()} />;
 
   const { set, stats } = data;
+  const ownedBase = data.cards.filter((c) => owned.has(c.id) && !isSecret(c.number, set.printedTotal)).length;
+  const quickAdd = (card: CardSummary) =>
+    add.mutate(
+      { cardId: card.id, variant: card.priceVariant ?? 'normal' },
+      { onSuccess: () => setJustAdded(`Added ${card.name} to your collection.`) },
+    );
   return (
     <div className="container-custom py-8 sm:py-10">
       <nav aria-label="Breadcrumb" className="mb-6 text-sm text-slate-500">
@@ -90,6 +103,27 @@ export default function SetPage() {
         />
       </dl>
 
+      {checklist.data && owned.size > 0 && (
+        <section aria-label="Your progress" className="panel mb-8 grid gap-3 p-5 md:grid-cols-[1fr_auto_auto] md:items-center">
+          <div className="grid gap-2">
+            <p className="font-semibold text-slate-900">
+              You have {ownedBase} of {set.printedTotal} ({Math.round((ownedBase / Math.max(1, set.printedTotal)) * 100)}%)
+            </p>
+            <span className="h-2 overflow-hidden rounded-full bg-slate-100">
+              <span className="block h-full rounded-full bg-pokemon-blue" style={{ width: `${Math.min(100, (ownedBase / Math.max(1, set.printedTotal)) * 100)}%` }} />
+            </span>
+          </div>
+          <div className="text-sm">
+            <p className="text-slate-500">To finish the main set</p>
+            <p className="price text-xl text-slate-900">{formatTotal(checklist.data.costToCompleteBase)}</p>
+          </div>
+          <div className="text-sm">
+            <p className="text-slate-500">Including secret rares</p>
+            <p className="price text-xl text-slate-900">{formatTotal(checklist.data.costToCompleteAll)}</p>
+          </div>
+        </section>
+      )}
+
       <div className="mb-5 flex flex-wrap items-end gap-3">
         <label className="grid gap-1 text-sm font-medium">
           Find in set
@@ -116,17 +150,32 @@ export default function SetPage() {
             ))}
           </select>
         </label>
+        {owned.size > 0 && (
+          <label className="grid gap-1 text-sm font-medium">
+            Show
+            <select className="input w-40" value={show} onChange={(e) => update('show', e.target.value)}>
+              <option value="">All cards</option>
+              <option value="owned">Cards I have</option>
+              <option value="missing">Cards I need</option>
+            </select>
+          </label>
+        )}
         <p className="ml-auto text-sm text-slate-500" aria-live="polite">
           {cards.length} of {data.cards.length} cards
         </p>
       </div>
+
+      <p role="status" className="mb-3 text-sm text-emerald-700">
+        {justAdded}
+        {add.error && <span className="text-red-700">{add.error.message}</span>}
+      </p>
 
       {cards.length === 0 ? (
         <p className="panel p-10 text-center text-slate-500">No cards match those filters.</p>
       ) : (
         <ul className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6">
           {cards.map((card) => (
-            <li key={card.id}>
+            <li key={card.id} className="grid gap-1.5">
               <CardTile
                 id={card.id}
                 name={card.name}
@@ -134,7 +183,22 @@ export default function SetPage() {
                 imageUrl={card.imageUrl}
                 price={card.marketPrice}
                 subtitle={`#${card.number}${card.rarity ? ` · ${card.rarity}` : ''}`}
+                badge={
+                  owned.has(card.id) ? (
+                    <span className="rounded-full bg-emerald-600 px-2 py-0.5 text-[11px] font-bold text-white shadow">
+                      Have {owned.get(card.id)}
+                    </span>
+                  ) : undefined
+                }
               />
+              <button
+                type="button"
+                className="rounded-lg border border-slate-200 bg-white py-1 text-xs font-semibold text-pokemon-pokeblue hover:border-pokemon-blue"
+                onClick={() => quickAdd(card)}
+                aria-label={`Add ${card.name} #${card.number} to collection`}
+              >
+                + Add
+              </button>
             </li>
           ))}
         </ul>
@@ -162,3 +226,6 @@ function Stat({ label, value, hint, href }: { label: string; value: string; hint
     </div>
   );
 }
+
+/** Numbered past the printed total ("SV 205/198"): a secret rare, left out of "the main set". */
+const isSecret = (number: string, printedTotal: number) => /^\d+$/.test(number) && Number(number) > printedTotal;

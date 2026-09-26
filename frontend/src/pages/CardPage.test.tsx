@@ -1,4 +1,5 @@
 import { screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 
 import type { CardDetail } from '../api/types';
 import { mockApi, renderRoute } from '../test-utils';
@@ -115,5 +116,35 @@ describe('CardPage', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Upstream is down');
     expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+  });
+});
+
+describe('CardPage collection panel', () => {
+  it('starts a guest collection on the first add and sends it as JSON', async () => {
+    const fetchMock = mockApi({
+      '/api/cards/sv3pt5-6': card,
+      '/api/account': { signedIn: false, isGuest: false, email: null },
+      'POST /api/account/guest': { signedIn: true, isGuest: true, email: null },
+      'POST /api/collection/items': { items: [], wish: null },
+      '/api/collection/cards/sv3pt5-6': { items: [], wish: null },
+    });
+    renderRoute('/cards/sv3pt5-6', '/cards/:cardId', <CardPage />);
+    const user = userEvent.setup();
+
+    await screen.findByRole('heading', { name: 'Your collection' });
+    await user.selectOptions(screen.getByLabelText('Condition'), 'LightlyPlayed');
+    await user.clear(screen.getByLabelText('Quantity'));
+    await user.type(screen.getByLabelText('Quantity'), '2');
+    await user.type(screen.getByLabelText(/Paid each/), '19.5');
+    await user.click(screen.getByRole('button', { name: 'Add to collection' }));
+
+    expect(await screen.findByText('Added 2 × Charizard ex.')).toBeInTheDocument();
+    const posts = fetchMock.mock.calls.filter(([, init]) => init?.method === 'POST').map(([url, init]) => [String(url), init]);
+    expect(posts.map(([url]) => url)).toEqual(['/api/account/guest', '/api/collection/items']);
+    const [, addInit] = posts[1] as [string, RequestInit];
+    expect(new Headers(addInit.headers).get('x-requested-with')).toBe('fetch');
+    expect(JSON.parse(String(addInit.body))).toEqual({
+      cardId: 'sv3pt5-6', variant: 'holofoil', condition: 'LightlyPlayed', quantity: 2, costEach: 19.5,
+    });
   });
 });

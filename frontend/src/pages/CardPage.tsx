@@ -1,6 +1,7 @@
 import { Link, useParams } from 'react-router-dom';
 
 import { useCard, useCardPredictions } from '../api/hooks';
+import { AddToCollection } from '../components/collection/AddToCollection';
 import { CardOutlook } from '../components/Predictions';
 import { PriceHistoryChart } from '../components/PriceHistoryChart';
 import { ShopLink } from '../components/ShopLink';
@@ -104,6 +105,8 @@ export default function CardPage() {
               <p className="text-sm text-slate-600">TCGplayer doesn&apos;t list a price for this card yet.</p>
             )}
           </section>
+
+          <AddToCollection card={card} />
 
           <section aria-labelledby="history-heading" className="panel grid gap-3 p-5">
             <h2 id="history-heading" className="text-lg">Price history</h2>

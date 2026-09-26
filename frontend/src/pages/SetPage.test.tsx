@@ -69,4 +69,28 @@ describe('SetPage', () => {
     await user.type(screen.getByLabelText('Find in set'), '199');
     expect(names()).toEqual(['Charizard ex']);
   });
+
+  it('marks owned cards, shows what the rest costs, and filters to the cards still needed', async () => {
+    mockApi({
+      '/api/sets/sv3pt5': detail,
+      '/api/account': { signedIn: true, isGuest: true, email: null },
+      '/api/collection/sets/sv3pt5': {
+        setId: 'sv3pt5', printedTotal: 165, total: 207,
+        owned: [{ cardId: 'sv3pt5-1', quantity: 2, variants: ['normal'] }],
+        missing: [], costToCompleteBase: 812.4, costToCompleteAll: 2410,
+      },
+    });
+    const user = userEvent.setup();
+    renderRoute('/sets/sv3pt5', '/sets/:setId', <SetPage />);
+
+    expect(await screen.findByText('You have 1 of 165 (1%)')).toBeInTheDocument();
+    expect(screen.getByText('$812.40')).toBeInTheDocument();
+    expect(screen.getByText('$2,410')).toBeInTheDocument();
+    expect(screen.getByText('Have 2')).toBeInTheDocument();
+
+    await user.selectOptions(screen.getByLabelText('Show'), 'missing');
+    expect(names()).toEqual(['Ivysaur', 'Metapod', 'Charizard ex']);
+    await user.selectOptions(screen.getByLabelText('Show'), 'owned');
+    expect(names()).toEqual(['Bulbasaur']);
+  });
 });

@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom';
 
+import { useAccount } from '../api/collection';
 import { useMarketStatus } from '../api/hooks';
 import { formatDate } from '../lib/format';
 
@@ -39,6 +40,7 @@ const navClass = ({ isActive }: { isActive: boolean }) =>
 
 export function Layout() {
   const status = useMarketStatus();
+  const account = useAccount();
   return (
     <div className="flex min-h-screen flex-col">
       <a href="#main" className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:rounded focus:bg-white focus:px-3 focus:py-2">
@@ -50,9 +52,15 @@ export function Layout() {
             <span aria-hidden="true" className="grid h-8 w-8 place-items-center rounded-full bg-pokemon-yellow text-sm font-black text-pokemon-pokeblue">
               $
             </span>
-            TCG Price Guide
+            TCG Collector
           </Link>
-          <nav aria-label="Main" className="flex items-center gap-1">
+          <nav aria-label="Main" className="flex flex-wrap items-center gap-1">
+            <NavLink to="/" end className={navClass}>
+              My collection
+            </NavLink>
+            <NavLink to="/wishlist" className={navClass}>
+              Wishlist
+            </NavLink>
             <NavLink to="/sets" className={navClass}>
               Sets
             </NavLink>
@@ -66,7 +74,10 @@ export function Layout() {
               How it works
             </NavLink>
           </nav>
-          <SearchForm className="order-last w-full sm:order-none sm:ml-auto sm:w-72" />
+          <SearchForm className="order-last w-full sm:order-none sm:ml-auto sm:w-64" />
+          <NavLink to="/account" className={navClass}>
+            {account.data?.signedIn && !account.data.isGuest ? 'Account' : 'Sign in'}
+          </NavLink>
         </div>
       </header>
 
@@ -76,10 +87,15 @@ export function Layout() {
 
       <footer className="border-t border-slate-200 bg-white">
         <div className="container-custom flex flex-wrap items-center justify-between gap-3 py-6 text-sm text-slate-500">
-          <p>
-            Prices are TCGplayer market prices via the Pokémon TCG API
-            {status.data?.lastSnapshotAt ? `, last recorded ${formatDate(status.data.lastSnapshotAt, 'short')}` : ''}.
-            Not affiliated with Nintendo, The Pokémon Company or TCGplayer.
+          <p className="max-w-3xl">
+            {status.data?.tcgplayerApi
+              ? 'Prices from the TCGplayer API'
+              : 'Prices are TCGplayer market prices via the Pokémon TCG API'}
+            {status.data?.lastSnapshotAt ? `, last recorded ${formatDate(status.data.lastSnapshotAt, 'short')}` : ''}.{' '}
+            {status.data?.tcgplayerApi
+              ? 'This product uses TCGplayer data but is not endorsed or certified by TCGplayer. '
+              : 'Not affiliated with TCGplayer. '}
+            Not affiliated with Nintendo or The Pokémon Company.
           </p>
           <a href="https://github.com/poker-kid-100717/tcg" className="font-semibold hover:text-slate-900">
             Source on GitHub

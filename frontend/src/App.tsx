@@ -5,7 +5,9 @@ import { Layout } from './components/Layout';
 import { Loading, NotFound } from './components/States';
 
 // Each page is its own chunk, so the first load only fetches the page shown.
-const HomePage = lazy(() => import('./pages/HomePage'));
+const CollectionPage = lazy(() => import('./pages/CollectionPage'));
+const WishlistPage = lazy(() => import('./pages/WishlistPage'));
+const AccountPage = lazy(() => import('./pages/AccountPage'));
 const SetsPage = lazy(() => import('./pages/SetsPage'));
 const SetPage = lazy(() => import('./pages/SetPage'));
 const CardPage = lazy(() => import('./pages/CardPage'));
@@ -20,7 +22,9 @@ export default function App() {
       <Suspense fallback={<Loading />}>
         <Routes>
           <Route element={<Layout />}>
-            <Route index element={<HomePage />} />
+            <Route index element={<CollectionPage />} />
+            <Route path="wishlist" element={<WishlistPage />} />
+            <Route path="account" element={<AccountPage />} />
             <Route path="sets" element={<SetsPage />} />
             <Route path="sets/:setId" element={<SetPage />} />
             <Route path="cards/:cardId" element={<CardPage />} />
