@@ -42,10 +42,16 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: deploy --config wrangler.store-preview.jsonc
-          secrets: |
-            TCG_DATABASE_URL
+
+      - name: Upload preview database secret
+        shell: bash
         env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           TCG_DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$TCG_DATABASE_URL" | npx wrangler secret put TCG_DATABASE_URL --config wrangler.store-preview.jsonc
 
       - name: Upload optional non-billing provider secrets
         shell: bash
