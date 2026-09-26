@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 
 import { useCard, useSearch, useSession } from '../api/hooks';
 import type { CardSummary } from '../api/types';
@@ -11,10 +11,12 @@ const num = (value: string) => (value.trim() === '' ? 0 : Number(value));
 
 export default function DealAnalyzerPage() {
   const session = useSession();
+  const [params, setParams] = useSearchParams();
   const [query, setQuery] = useState('');
   const search = useSearch(query, 1);
   const [selected, setSelected] = useState<CardSummary | null>(null);
-  const card = useCard(selected?.id ?? '');
+  const selectedId = selected?.id ?? params.get('card') ?? '';
+  const card = useCard(selectedId);
   const [variant, setVariant] = useState('');
   const [purchase, setPurchase] = useState('');
   const [buyerShipping, setBuyerShipping] = useState('0');
@@ -67,7 +69,7 @@ export default function DealAnalyzerPage() {
               <button
                 type="button"
                 key={result.id}
-                onClick={() => { setSelected(result); setQuery(result.name); }}
+                onClick={() => { setSelected(result); setQuery(result.name); setParams({ card: result.id }, { replace: true }); }}
                 className="flex items-center gap-3 rounded-lg border border-slate-200 p-2 text-left hover:border-pokemon-blue"
               >
                 {result.imageUrl && <img src={result.imageUrl} alt="" className="h-16 w-12 rounded object-cover" />}
@@ -82,7 +84,7 @@ export default function DealAnalyzerPage() {
         )}
       </section>
 
-      {selected && card.isPending && <Loading label="Loading card pricing…" />}
+      {selectedId && card.isPending && <Loading label="Loading card pricing…" />}
 
       {card.data && (
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.8fr)]">
