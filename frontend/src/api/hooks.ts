@@ -217,3 +217,18 @@ export const useDeleteMasterSet = () => {
 
 export const useMasterSetAdvisor = () =>
   useMutation({ mutationFn: api.masterSetAdvisor });
+
+
+export const useNearbyInventory = (
+  latitude: number | null,
+  longitude: number | null,
+  radiusMiles: number,
+) =>
+  useQuery({
+    queryKey: ['nearby-inventory', latitude, longitude, radiusMiles],
+    queryFn: ({ signal }) => api.nearbyInventory(latitude!, longitude!, radiusMiles, signal),
+    enabled: latitude !== null && longitude !== null,
+    staleTime: minutes(2),
+    refetchInterval: minutes(2),
+    retry: shouldRetry,
+  });
