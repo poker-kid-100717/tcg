@@ -229,7 +229,7 @@ public sealed class StripeBillingService(
 
     private void EnsureConfigured()
     {
-        if (!options.IsConfigured)
+        if (!options.StripeConfigured)
             throw new InvalidOperationException("Stripe billing is not configured.");
     }
 
