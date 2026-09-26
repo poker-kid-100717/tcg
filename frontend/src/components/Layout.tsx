@@ -3,6 +3,7 @@ import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom';
 
 import { useMarketStatus, useSession } from '../api/hooks';
 import { formatDate } from '../lib/format';
+import { STORE_PREVIEW } from '../lib/storePreview';
 
 function SearchForm({ className = '' }: { className?: string }) {
   const navigate = useNavigate();
@@ -45,6 +46,14 @@ export function Layout() {
       <a href="#main" className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:rounded focus:bg-white focus:px-3 focus:py-2">
         Skip to content
       </a>
+      {STORE_PREVIEW && (
+        <div className="bg-amber-100 text-amber-950 ring-1 ring-inset ring-amber-200">
+          <div className="container-custom flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
+            <span><strong>Early feedback preview.</strong> Everything is unlocked for evaluation — nothing here is being sold to you.</span>
+            <Link to="/feedback" className="font-bold underline underline-offset-2">Give candid feedback →</Link>
+          </div>
+        </div>
+      )}
       <header className="bg-pokemon-pokeblue text-white">
         <div className="container-custom flex flex-wrap items-center gap-x-6 gap-y-3 py-3">
           <Link to="/" className="flex items-center gap-2.5 font-heading text-lg font-extrabold tracking-tight">
@@ -75,6 +84,11 @@ export function Layout() {
             <NavLink to="/dashboard" className={navClass}>
               Dashboard
             </NavLink>
+            {STORE_PREVIEW && (
+              <NavLink to="/feedback" className={navClass}>
+                Feedback
+              </NavLink>
+            )}
             {session.data?.hasStoreFinder && (
               <NavLink to="/available-in-stores" className={navClass}>
                 Available in Stores
@@ -83,10 +97,10 @@ export function Layout() {
           </nav>
           <SearchForm className="order-last w-full lg:order-none lg:ml-auto lg:w-64" />
           <Link
-            to="/pro"
+            to={STORE_PREVIEW ? '/feedback' : '/pro'}
             className="rounded-full bg-pokemon-yellow px-3 py-1.5 text-xs font-extrabold text-pokemon-pokeblue"
           >
-            {session.data?.isPro ? (session.data.billingConfigured ? 'PRO' : 'PRO PREVIEW') : 'GET PRO'}
+            {STORE_PREVIEW ? 'GIVE FEEDBACK' : session.data?.isPro ? (session.data.billingConfigured ? 'PRO' : 'PRO PREVIEW') : 'GET PRO'}
           </Link>
         </div>
       </header>
