@@ -5,6 +5,7 @@ using Microsoft.Extensions.Http.Resilience;
 using PokemonTCG.API.Data;
 using PokemonTCG.API.Pricing;
 using PokemonTCG.API.Pricing.Predictions;
+using PokemonTCG.API.Product;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -46,8 +47,9 @@ if (string.IsNullOrWhiteSpace(connectionString))
         "ConnectionStrings:DefaultConnection is not configured. Set it via the " +
         "ConnectionStrings__DefaultConnection environment variable.");
 }
+var normalizedConnectionString = PostgresConnectionString.Normalize(connectionString);
 builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseNpgsql(PostgresConnectionString.Normalize(connectionString)));
+    options.UseNpgsql(normalizedConnectionString));
 
 // Card and price data: the Pokémon TCG API, with retries and timeouts sized
 // for its full 250-card pages, and a shared cache in front of it.
@@ -72,6 +74,18 @@ builder.Services.AddScoped<PriceGuideService>();
 builder.Services.AddSingleton(builder.Configuration.GetSection(PredictionOptions.SectionName).Get<PredictionOptions>() ?? new());
 builder.Services.AddScoped<PredictionService>();
 
+// TCG Signal MVP: device-bound collector profiles, watchlists, explainable market
+// intelligence and optional Stripe subscriptions. Without Stripe configuration,
+ // the app deliberately runs as a full-feature founding preview.
+var billingOptions = builder.Configuration.GetSection(BillingOptions.SectionName).Get<BillingOptions>() ?? new();
+builder.Services.AddSingleton(billingOptions);
+builder.Services.AddSingleton(new ProductStore(normalizedConnectionString));
+builder.Services.AddScoped<SessionService>();
+builder.Services.AddScoped<EntitlementService>();
+builder.Services.AddScoped<MarketIntelligenceService>();
+builder.Services.AddScoped<AlertEvaluationService>();
+builder.Services.AddHttpClient<StripeBillingService>();
+
 var app = builder.Build();
 
 app.UseExceptionHandler();
@@ -91,6 +105,7 @@ app.UseMiddleware<DatabaseReadinessMiddleware>();
 
 app.MapPriceGuide();
 app.MapPredictions();
+app.MapProduct();
 app.MapHealthChecks("/health");
 app.MapHealthChecks("/health/live", new HealthCheckOptions { Predicate = _ => false });
 
