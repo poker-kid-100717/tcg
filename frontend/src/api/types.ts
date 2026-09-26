@@ -337,3 +337,57 @@ export interface Dashboard {
 export interface BillingLink {
   url: string;
 }
+
+
+export interface MasterSetSummary {
+  id: number;
+  setId: string;
+  setName: string;
+  setSeries: string;
+  logoUrl: string | null;
+  uniqueCards: number;
+  requiredPrintings: number;
+  ownedPrintings: number;
+  completionPercent: number;
+  ownedMarketValue: number;
+  missingMarketCost: number;
+}
+
+export interface MasterSetItem {
+  cardId: string;
+  variant: string;
+  variantLabel: string;
+  cardName: string;
+  cardNumber: string;
+  rarity: string | null;
+  imageUrl: string | null;
+  tcgplayerUrl: string | null;
+  currentMarketPrice: number | null;
+  change30Percent: number | null;
+  ownedQuantity: number;
+  condition: string | null;
+  acquiredPrice: number | null;
+  signal: string;
+  signalReason: string;
+}
+
+export interface MasterSetDetail {
+  summary: MasterSetSummary;
+  items: MasterSetItem[];
+}
+
+export interface MasterSetItemUpdate {
+  cardId: string;
+  variant: string;
+  ownedQuantity: number;
+  condition: string | null;
+  acquiredPrice: number | null;
+}
+
+export interface MasterSetAiAdvice {
+  text: string;
+  provider: string;
+  model: string;
+  generatedByAi: boolean;
+  generatedAt: string;
+}
