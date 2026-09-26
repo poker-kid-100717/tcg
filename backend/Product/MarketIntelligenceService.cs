@@ -56,7 +56,7 @@ public sealed class MarketIntelligenceService(
         var change7 = ChangeFrom(rows, latest.Date.AddDays(-7), latest.Market);
         var change30 = ChangeFrom(rows, latest.Date.AddDays(-30), latest.Market);
         var volatility = Volatility(rows);
-        var spread = !usingScrydex && low is { } lowValue && high is { } highValue && latest.Market > 0
+        decimal? spread = !usingScrydex && low is { } lowValue && high is { } highValue && latest.Market > 0
             ? Math.Round((highValue - lowValue) / latest.Market * 100m, 1)
             : null;
 
