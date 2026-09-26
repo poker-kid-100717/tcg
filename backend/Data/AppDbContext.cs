@@ -64,6 +64,11 @@ namespace PokemonTCG.API.Data
         Running,
         /// <summary>Trained, validated and beat the no-change baseline, so its predictions are shown.</summary>
         Published,
+        /// <summary>
+        /// Immediate, unvalidated signal built from the latest market-versus-listing pressure while the
+        /// trained model is still collecting enough daily history.
+        /// </summary>
+        Preview,
         /// <summary>Trained but didn't beat the no-change baseline on held-out data, so nothing is shown.</summary>
         Withheld,
         /// <summary>Not enough price history to train and validate yet.</summary>
