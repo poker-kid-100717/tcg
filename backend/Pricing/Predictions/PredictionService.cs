@@ -22,8 +22,8 @@ public class PredictionService(AppDbContext db, PredictionOptions options, TimeP
     private const int OutcomeGraceDays = 5;
 
     /// <summary>
-    /// A snapshot stamps each price with TCGplayer's own update date, so a printing's price on a given day is its latest
-    /// one from up to this many days before. Every sample day (the latest included) is built from those prices.
+    /// A printing's price on a given day is its latest recorded one from up to this many days before, so a day the
+    /// snapshot didn't run (or history recorded before snapshots were dated by collection day) still has every printing.
     /// </summary>
     private const int CarryForwardDays = 7;
 
@@ -284,9 +284,8 @@ public class PredictionService(AppDbContext db, PredictionOptions options, TimeP
                 FROM daily
                 WINDOW w AS (PARTITION BY card_id, variant ORDER BY date RANGE BETWEEN INTERVAL '30 days' PRECEDING AND CURRENT ROW)
             ),
-            -- Each printing's latest known price as of each sample day. Upstream stamps prices with its own update
-            -- date, so a day's exact-date rows are only part of the market; ranks, shares and premiums below are
-            -- computed over every printing's as-of price instead.
+            -- Each printing's latest known price as of each sample day, so a day with a missed snapshot is still the
+            -- whole market; ranks, shares and premiums below are computed over every printing's as-of price.
             as_of AS (
                 SELECT DISTINCT ON (sd.d, w.card_id, w.variant)
                        w.card_id, w.variant, sd.d AS date, w.market, w.low, w.mid, w.high, w.vol30, w.slope30, w.fit30

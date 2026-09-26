@@ -109,7 +109,9 @@ public class PriceSnapshotService(
             from card in priced
             from price in card.Tcgplayer!.Prices!
             where price.Value.Market >= options.MinMarketPrice
-            select (card, variant: price.Key, price: price.Value, date: card.Tcgplayer!.Updated ?? today)
+            // Every row is dated the day it was recorded, not the upstream update date: each successful run is then a
+            // complete day of prices, so day-to-day history, returns and per-day aggregates are over every printing.
+            select (card, variant: price.Key, price: price.Value, date: today)
         ).ToList();
         if (rows.Count == 0) return 0;
 

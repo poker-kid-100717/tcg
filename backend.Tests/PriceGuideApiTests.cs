@@ -92,13 +92,22 @@ namespace PokemonTcgMarketplace.Backend.Tests
             fixture.Upstream.AddCard(set, "3", "Bulk", "Common", weekAgo, ("normal", 0.10m));
             fixture.Upstream.AddCard(set, "4", "Steady", "Rare", weekAgo, ("holofoil", 5m));
 
-            var first = await RunSnapshot();
-            Assert.Equal(SnapshotStatus.Succeeded, first.Status);
+            // Record last week's prices a week ago, then today's today.
+            fixture.Clock.Offset = TimeSpan.FromDays(-7);
+            try
+            {
+                var first = await RunSnapshot();
+                Assert.Equal(SnapshotStatus.Succeeded, first.Status);
+            }
+            finally
+            {
+                fixture.Clock.Offset = TimeSpan.Zero;
+            }
 
             fixture.Upstream.SetPrices("mkt1-1", Today, ("holofoil", 25m), ("reverseHolofoil", 12m));
             fixture.Upstream.SetPrices("mkt1-2", Today, ("holofoil", 30m));
             fixture.Upstream.SetPrices("mkt1-3", Today, ("normal", 0.40m));
-            fixture.Upstream.SetPrices("mkt1-4", Today, ("holofoil", 5m));
+            // mkt1-4 isn't updated upstream this week; its price is still recorded for today.
             await RunSnapshot();
             var rerun = await RunSnapshot(); // same day again: overwrites, doesn't duplicate
             Assert.Equal(SnapshotStatus.Succeeded, rerun.Status);
@@ -108,6 +117,8 @@ namespace PokemonTcgMarketplace.Backend.Tests
                 var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
                 var rows = await db.PriceSnapshots.Where(s => s.CardId.StartsWith("mkt1-")).ToListAsync();
                 Assert.Equal(8, rows.Count); // 4 printings over the minimum × 2 days; bulk commons skipped
+                // Rows are dated by the day they were recorded, even when upstream last updated the price earlier.
+                Assert.Equal([weekAgo, Today], rows.Where(r => r.CardId == "mkt1-4").Select(r => r.Date).Order());
                 Assert.DoesNotContain(rows, r => r.CardId == "mkt1-3");
                 var stored = await db.Cards.SingleAsync(c => c.Id == "mkt1-1");
                 Assert.Equal("Riser", stored.Name);

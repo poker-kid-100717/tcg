@@ -16,6 +16,9 @@ namespace PokemonTcgMarketplace.Backend.Tests
         private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder("postgres:17").Build();
 
         public FakePokemonTcgApi Upstream { get; } = new();
+
+        /// <summary>The API's clock: real time plus <see cref="TestClock.Offset"/>, so a test can record "last week".</summary>
+        public TestClock Clock { get; } = new();
         public WebApplicationFactory<Program> Factory { get; private set; } = null!;
 
         public async Task InitializeAsync()
@@ -29,7 +32,10 @@ namespace PokemonTcgMarketplace.Backend.Tests
                 builder.UseSetting("Snapshots:PageDelayMilliseconds", "0");
                 foreach (var (key, value) in Settings) builder.UseSetting(key, value);
                 builder.ConfigureTestServices(services =>
-                    services.AddHttpClient<PokemonTcgClient>().ConfigurePrimaryHttpMessageHandler(() => Upstream));
+                {
+                    services.AddHttpClient<PokemonTcgClient>().ConfigurePrimaryHttpMessageHandler(() => Upstream);
+                    services.AddSingleton<TimeProvider>(Clock);
+                });
             });
 
             // Wait for the startup migration before tests use the database.
@@ -81,5 +87,11 @@ namespace PokemonTcgMarketplace.Backend.Tests
     public class ApiCollection : ICollectionFixture<ApiFixture>
     {
         public const string Name = "api";
+    }
+
+    public sealed class TestClock : TimeProvider
+    {
+        public TimeSpan Offset { get; set; }
+        public override DateTimeOffset GetUtcNow() => System.GetUtcNow() + Offset;
     }
 }
