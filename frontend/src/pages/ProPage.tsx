@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { api } from '../api/client';
 import { useSession } from '../api/hooks';
 import { Loading } from '../components/States';
+import { STORE_PREVIEW } from '../lib/storePreview';
 
 type CheckoutPlan = 'monthly' | 'annual' | 'storefinder' | 'complete';
 
@@ -38,16 +39,17 @@ export default function ProPage() {
     }
   };
 
-  const preview = !account?.billingConfigured;
+  const preview = STORE_PREVIEW || !account?.billingConfigured;
 
   return (
     <div className="container-custom grid gap-10 py-10 sm:py-14">
       <header className="mx-auto grid max-w-3xl gap-3 text-center">
-        <p className="eyebrow">TCG Signal plans</p>
-        <h1 className="text-4xl sm:text-5xl">Price intelligence and local inventory, separately or together.</h1>
+        <p className="eyebrow">{STORE_PREVIEW ? 'Feature preview' : 'TCG Signal plans'}</p>
+        <h1 className="text-4xl sm:text-5xl">{STORE_PREVIEW ? 'Everything is unlocked for evaluation.' : 'Price intelligence and local inventory, separately or together.'}</h1>
         <p className="text-lg text-slate-600">
-          Pro helps evaluate the market. Store Finder monitors supported retailers near you and only surfaces
-          store-level inventory that meets the evidence standard.
+          {STORE_PREVIEW
+            ? 'This build is for product feedback, not checkout. Explore the paid-feature concepts freely and judge whether they solve problems collectors actually have.'
+            : 'Pro helps evaluate the market. Store Finder monitors supported retailers near you and only surfaces store-level inventory that meets the evidence standard.'}
         </p>
         {preview && (
           <div className="mx-auto mt-2 rounded-full bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-800 ring-1 ring-emerald-200">
@@ -59,7 +61,7 @@ export default function ProPage() {
       <div className="mx-auto grid w-full max-w-6xl gap-5 lg:grid-cols-3">
         <Plan
           name="Pro"
-          price="$9.99/mo"
+          price={STORE_PREVIEW ? 'Preview access' : '$9.99/mo'}
           description="Market intelligence for buy, sell, grade and trade decisions."
           features={[
             'Market Confidence with transparent reasons',
@@ -70,7 +72,9 @@ export default function ProPage() {
             'Longer signal context and model outlook',
           ]}
           actions={
-            account?.isPro && account.billingConfigured ? (
+            STORE_PREVIEW ? (
+              <Preview label="Unlocked in this feedback build" />
+            ) : account?.isPro && account.billingConfigured ? (
               <button type="button" className="btn w-full bg-pokemon-pokeblue text-white" disabled={working !== null} onClick={manage}>
                 {working === 'portal' ? 'Opening…' : 'Manage subscription'}
               </button>
@@ -92,7 +96,7 @@ export default function ProPage() {
         <Plan
           featured
           name="Store Finder"
-          price="$4.99/mo"
+          price={STORE_PREVIEW ? 'Preview access' : '$4.99/mo'}
           description="Local Pokémon inventory monitoring built around accuracy rather than alert volume."
           features={[
             'Available in Stores account tab',
@@ -103,7 +107,9 @@ export default function ProPage() {
             'Retailer coverage status instead of silent failures',
           ]}
           actions={
-            account?.hasStoreFinder && account.storeFinderBillingConfigured ? (
+            STORE_PREVIEW ? (
+              <Preview label="Unlocked in this feedback build" />
+            ) : account?.hasStoreFinder && account.storeFinderBillingConfigured ? (
               <button type="button" className="btn w-full bg-pokemon-pokeblue text-white" disabled={working !== null} onClick={manage}>
                 {working === 'portal' ? 'Opening…' : 'Manage subscription'}
               </button>
@@ -119,7 +125,7 @@ export default function ProPage() {
 
         <Plan
           name="Complete"
-          price="$12.99/mo"
+          price={STORE_PREVIEW ? 'Preview access' : '$12.99/mo'}
           description="Both TCG Signal Pro and Store Finder under one subscription."
           features={[
             'Everything in Pro',
@@ -128,7 +134,9 @@ export default function ProPage() {
             'Best value for active collectors',
           ]}
           actions={
-            account?.plan === 'complete' && account.billingConfigured ? (
+            STORE_PREVIEW ? (
+              <Preview label="Unlocked in this feedback build" />
+            ) : account?.plan === 'complete' && account.billingConfigured ? (
               <button type="button" className="btn w-full bg-pokemon-pokeblue text-white" disabled={working !== null} onClick={manage}>
                 {working === 'portal' ? 'Opening…' : 'Manage subscription'}
               </button>
@@ -150,6 +158,13 @@ export default function ProPage() {
         <Feature title="Useful at the moment of purchase" body="Store Finder combines radius, distance, evidence, verification time and retailer links so a collector can act quickly." />
         <Feature title="Independent service boundary" body="Inventory runs separately from pricing so release-day polling, retailer failures and scaling do not destabilize the core market API." />
       </section>
+
+      {STORE_PREVIEW && (
+        <div className="mx-auto flex max-w-3xl flex-wrap items-center justify-center gap-3 rounded-xl bg-amber-50 px-5 py-4 text-center ring-1 ring-amber-200">
+          <span className="text-sm font-semibold text-amber-950">Which of these would collectors actually pay attention to?</span>
+          <a href="/feedback" className="btn bg-pokemon-pokeblue text-white">Give feedback</a>
+        </div>
+      )}
 
       <p className="mx-auto max-w-3xl text-center text-xs leading-5 text-slate-500">
         Store availability can change between verification and arrival. TCG Signal reports the source and time of each observation and never invents quantity.
