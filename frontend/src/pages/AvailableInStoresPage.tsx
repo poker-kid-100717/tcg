@@ -235,6 +235,22 @@ export default function AvailableInStoresPage() {
                       <div className="border-t border-slate-100 bg-slate-50 px-5 py-3">
                         <p className="text-xs leading-5 text-slate-600">{item.evidence}</p>
                         <p className="text-xs text-slate-400">Source: {item.source}</p>
+                        {item.retailer === 'Best Buy' && (
+                          <a
+                            href="https://developer.bestbuy.com"
+                            target="_blank"
+                            rel="noreferrer"
+                            className="mt-2 inline-flex"
+                            aria-label="Best Buy Developer API"
+                          >
+                            <img
+                              src="https://developer.bestbuy.com/images/bestbuy-logo.png"
+                              alt="Best Buy Developer API"
+                              className="h-5 w-auto object-contain"
+                              loading="lazy"
+                            />
+                          </a>
+                        )}
                         <div className="mt-2 flex flex-wrap gap-3 text-sm font-semibold">
                           <a href={directions} target="_blank" rel="noreferrer" className="text-pokemon-pokeblue hover:underline">Directions</a>
                           {item.productUrl && (
