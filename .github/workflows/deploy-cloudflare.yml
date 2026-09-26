@@ -48,6 +48,37 @@ jobs:
         env:
           TCG_DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
+      - name: Upload optional product secrets
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          TCG_POKEMONTCG_API_KEY: ${{ secrets.POKEMONTCG_API_KEY }}
+          TCG_SCRYDEX_API_KEY: ${{ secrets.SCRYDEX_API_KEY }}
+          TCG_SCRYDEX_TEAM_ID: ${{ secrets.SCRYDEX_TEAM_ID }}
+          TCG_STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          TCG_STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
+          TCG_STRIPE_PRO_MONTHLY_PRICE_ID: ${{ secrets.STRIPE_PRO_MONTHLY_PRICE_ID }}
+          TCG_STRIPE_PRO_ANNUAL_PRICE_ID: ${{ secrets.STRIPE_PRO_ANNUAL_PRICE_ID }}
+        run: |
+          set -euo pipefail
+
+          put_if_present() {
+            name="$1"
+            value="$2"
+            if [ -n "$value" ]; then
+              printf '%s' "$value" | npx wrangler secret put "$name"
+            fi
+          }
+
+          put_if_present TCG_POKEMONTCG_API_KEY "$TCG_POKEMONTCG_API_KEY"
+          put_if_present TCG_SCRYDEX_API_KEY "$TCG_SCRYDEX_API_KEY"
+          put_if_present TCG_SCRYDEX_TEAM_ID "$TCG_SCRYDEX_TEAM_ID"
+          put_if_present TCG_STRIPE_SECRET_KEY "$TCG_STRIPE_SECRET_KEY"
+          put_if_present TCG_STRIPE_WEBHOOK_SECRET "$TCG_STRIPE_WEBHOOK_SECRET"
+          put_if_present TCG_STRIPE_PRO_MONTHLY_PRICE_ID "$TCG_STRIPE_PRO_MONTHLY_PRICE_ID"
+          put_if_present TCG_STRIPE_PRO_ANNUAL_PRICE_ID "$TCG_STRIPE_PRO_ANNUAL_PRICE_ID"
+
       - name: Verify production site and API
         shell: bash
         run: |
@@ -56,6 +87,7 @@ jobs:
 
           curl --fail --silent --show-error --retry 12 --retry-delay 10 --retry-all-errors "$SITE/health" | grep -q Healthy
           curl --fail --silent --show-error "$SITE/sets" | grep -q '<div id="root">'
+          curl --fail --silent --show-error "$SITE/pro" | grep -q '<div id="root">'
 
           # The price guide API answers with the set list from the card database.
           curl --fail --silent --show-error --retry 3 --retry-delay 10 "$SITE/api/sets" | grep -q '"releaseDate"'
