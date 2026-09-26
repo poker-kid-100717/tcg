@@ -84,7 +84,14 @@ export const api = {
   cardPredictions: (id: string, signal?: AbortSignal) => get<PredictionList>(`/cards/${enc(id)}/predictions`, signal),
   model: (signal?: AbortSignal) => get<ModelSummary>('/predictions/model', signal),
   nearbyInventory: (lat: number, lng: number, radius: number, signal?: AbortSignal) =>
-    get<NearbyInventory>(`/inventory/nearby?lat=${encodeURIComponent(lat)}&lng=${encodeURIComponent(lng)}&radius=${encodeURIComponent(radius)}`, signal),
+    request<NearbyInventory>(
+      '/inventory/nearby',
+      {
+        method: 'POST',
+        body: JSON.stringify({ latitude: lat, longitude: lng, radiusMiles: radius }),
+      },
+      signal,
+    ),
 
   session: () => post<Account>('/session'),
   intelligence: (id: string, variant: string, signal?: AbortSignal) =>
