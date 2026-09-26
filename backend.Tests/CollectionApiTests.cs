@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text;
@@ -284,6 +285,30 @@ namespace PokemonTcgMarketplace.Backend.Tests
 
             Assert.Equal(HttpStatusCode.NoContent, (await client.DeleteAsync($"/api/collection/goals/{main}")).StatusCode);
             Assert.DoesNotContain((await Read<CollectionView>(await client.GetAsync("/api/collection"))).Goals, g => g.SetId == main);
+        }
+        [Fact]
+        public async Task A_printing_held_in_two_conditions_gets_one_heads_up()
+        {
+            var set = await SeedSet("sig1");
+            // Raichu's holofoil has slid steadily from $40 to $20 over the last 30 days.
+            using (var scope = fixture.Factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                for (var ago = 30; ago >= 1; ago--)
+                {
+                    db.PriceSnapshots.Add(new PriceSnapshot { CardId = $"{set}-2", Variant = "holofoil", Date = Today.AddDays(-ago), Market = 20m + ago * 0.66m });
+                }
+                await db.SaveChangesAsync();
+            }
+            var client = Browser();
+            await client.PostAsync("/api/account/guest", null);
+            await client.PostAsJsonAsync("/api/collection/items", new AddItemRequest($"{set}-2", "holofoil", CardCondition.NearMint, 2), Json);
+            await client.PostAsJsonAsync("/api/collection/items", new AddItemRequest($"{set}-2", "holofoil", CardCondition.LightlyPlayed, 1), Json);
+
+            var signals = (await Read<CollectionView>(await client.GetAsync("/api/collection"))).Signals;
+            var signal = Assert.Single(signals, s => s.CardId == $"{set}-2");
+            Assert.Equal(("Watch", 3), (signal.Kind, signal.Quantity));
+            Assert.Contains(signal.Reasons, r => r.Contains("steady slide"));
         }
     }
 }

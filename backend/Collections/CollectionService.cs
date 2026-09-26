@@ -476,7 +476,18 @@ public class CollectionService(AppDbContext db, CatalogReader catalog, PokemonTc
     private static List<CollectionSignal> Signals(IReadOnlyList<CollectionItem> items, IReadOnlyList<CollectionEntry> entries, Context context)
     {
         var signals = new List<(CollectionSignal Signal, decimal Weight)>();
-        foreach (var entry in entries.Where(e => e.ValueEach is >= 2))
+        // One heads-up per printing: copies in different conditions are the same card to sell or hold.
+        var printings = entries.GroupBy(e => (e.CardId, e.Variant)).Select(g =>
+        {
+            var copies = g.ToList();
+            var quantity = copies.Sum(e => e.Quantity);
+            var total = copies.Sum(e => e.Total ?? 0);
+            var costed = copies.Where(e => e.CostEach is not null && e.ValueEach is not null).ToList();
+            var cost = costed.Sum(e => e.CostEach!.Value * e.Quantity);
+            decimal? gain = cost > 0 ? Math.Round((costed.Sum(e => e.ValueEach!.Value * e.Quantity) / cost - 1) * 100, 1) : null;
+            return copies[0] with { Quantity = quantity, Total = total, ValueEach = quantity > 0 ? Math.Round(total / quantity, 2) : null, GainPercent = gain };
+        });
+        foreach (var entry in printings.Where(e => e.ValueEach is >= 2))
         {
             var history = context.History[(entry.CardId, entry.Variant)].Where(h => h.Market is not null).ToList();
             var trend = DownTrend(history);

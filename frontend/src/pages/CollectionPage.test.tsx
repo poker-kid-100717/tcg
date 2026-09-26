@@ -54,6 +54,33 @@ describe('CollectionPage', () => {
     expect(posts).toEqual(['/api/account/guest', '/api/collection/sample']);
   });
 
+  it('shows the sample once it has been added, even though the first visit had no account yet', async () => {
+    // Like the real API: the collection is empty until the sample has been stored, and the POST takes a moment.
+    let sampled = false;
+    const empty = { ...view, items: [], goals: [], sets: [], signals: [], history: [] };
+    mockApi({
+      '/api/account': { signedIn: false, isGuest: false, email: null },
+      '/api/sets': [],
+      'POST /api/account/guest': { signedIn: true, isGuest: true, email: null },
+      'POST /api/collection/sample': async () => {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        sampled = true;
+        return { added: 24 };
+      },
+      // Reads what's stored when the request arrives, and answers a little later.
+      '/api/collection': async () => {
+        const answer = sampled ? view : empty;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        return answer;
+      },
+    });
+    renderRoute('/', '/', <CollectionPage />);
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Explore a sample collection' }));
+
+    expect(await screen.findByRole('heading', { name: /3 cards/ })).toBeInTheDocument();
+  });
+
   it('shows the three values, signals, holdings with confidence, and set progress', async () => {
     mockApi({ '/api/account': { signedIn: true, isGuest: true, email: null }, '/api/collection': view });
     renderRoute('/', '/', <CollectionPage />);

@@ -60,12 +60,18 @@ export const useWishlist = () => {
 
 /**
  * Collecting starts without a sign-up: the first add quietly creates a guest account (kept by a cookie), which
- * can be saved with an email later.
+ * can be saved with an email later. The new account is only put in the cache once the write that needed it has
+ * finished: switching to "signed in" earlier starts loading the collection while that write is still in flight,
+ * and the page would show the collection from before it.
  */
-async function ensureSession(client: ReturnType<typeof useQueryClient>) {
+async function withSession<T>(client: ReturnType<typeof useQueryClient>, write: () => Promise<T>): Promise<T> {
   const account = client.getQueryData<AccountView>(['account']);
-  if (account?.signedIn) return;
-  client.setQueryData(['account'], await api.startGuest());
+  const started = account?.signedIn ? null : await api.startGuest();
+  try {
+    return await write();
+  } finally {
+    if (started) client.setQueryData(['account'], started);
+  }
 }
 
 /** Everything that depends on what the collector owns. */
@@ -78,10 +84,7 @@ export function useCollectionActions() {
   const after = { onSettled: () => refreshCollection(client) };
   return {
     add: useMutation({
-      mutationFn: async (request: AddItemRequest) => {
-        await ensureSession(client);
-        return api.addItem(request);
-      },
+      mutationFn: (request: AddItemRequest) => withSession(client, () => api.addItem(request)),
       ...after,
     }),
     update: useMutation({
@@ -90,25 +93,17 @@ export function useCollectionActions() {
     }),
     remove: useMutation({ mutationFn: (id: string) => api.removeItem(id), ...after }),
     sample: useMutation({
-      mutationFn: async () => {
-        await ensureSession(client);
-        return api.addSample();
-      },
+      mutationFn: () => withSession(client, () => api.addSample()),
       ...after,
     }),
     wish: useMutation({
-      mutationFn: async ({ cardId, variant, targetPrice }: { cardId: string; variant: string | null; targetPrice: number | null }) => {
-        await ensureSession(client);
-        return api.wish(cardId, variant, targetPrice);
-      },
+      mutationFn: ({ cardId, variant, targetPrice }: { cardId: string; variant: string | null; targetPrice: number | null }) =>
+        withSession(client, () => api.wish(cardId, variant, targetPrice)),
       ...after,
     }),
     unwish: useMutation({ mutationFn: (id: string) => api.unwish(id), ...after }),
     setGoal: useMutation({
-      mutationFn: async ({ setId, kind }: { setId: string; kind: SetGoalKind }) => {
-        await ensureSession(client);
-        return api.setGoal(setId, kind);
-      },
+      mutationFn: ({ setId, kind }: { setId: string; kind: SetGoalKind }) => withSession(client, () => api.setGoal(setId, kind)),
       ...after,
     }),
     removeGoal: useMutation({ mutationFn: (setId: string) => api.removeGoal(setId), ...after }),

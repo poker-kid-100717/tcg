@@ -12,8 +12,10 @@ export function mockApi(routes: Record<string, unknown>) {
     const url = new URL(String(input), 'http://localhost');
     const key = url.pathname + url.search;
     const method = (init?.method ?? 'GET').toUpperCase();
-    const body =
+    const route =
       routes[`${method} ${key}`] ?? routes[`${method} ${url.pathname}`] ?? (method === 'GET' ? (routes[key] ?? routes[url.pathname]) : undefined);
+    // A function answers with whatever the test's state says now (e.g. empty until a POST has happened).
+    const body = typeof route === 'function' ? await route() : route;
     if (body === 204) return new Response(null, { status: 204 });
     if (body === undefined) return new Response(JSON.stringify({ title: 'Not found' }), { status: 404 });
     if (typeof body === 'number') return new Response(JSON.stringify({ title: 'Failed', detail: 'Upstream is down' }), { status: body });
