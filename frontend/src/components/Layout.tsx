@@ -69,6 +69,9 @@ export function Layout() {
             <NavLink to="/watchlist" className={navClass}>
               Watchlist
             </NavLink>
+            <NavLink to="/master-sets" className={navClass}>
+              Master Sets
+            </NavLink>
             <NavLink to="/dashboard" className={navClass}>
               Dashboard
             </NavLink>

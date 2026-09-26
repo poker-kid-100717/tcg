@@ -19,6 +19,15 @@ The application never invents transaction counts or sale prices. When transactio
 
 ## MVP
 
+### Master Set completion
+- Build a complete set checklist from every known card/printing variant.
+- Track owned vs. missing printings, completion percentage, owned market value, and estimated remaining cost.
+- Missing cards link out to TCGplayer; TCG Signal does not sell cards.
+- Missing cards can be added to the existing price watchlist with a default target.
+- Pro includes a grounded AI Set Advisor powered by Cloudflare Workers AI. The advisor receives only server-generated collection/market facts and falls back to deterministic recommendations if inference is unavailable.
+
+
+
 ### Free / public foundation
 
 - Pokémon set browser and card search.

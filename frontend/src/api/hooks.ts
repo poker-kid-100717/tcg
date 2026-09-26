@@ -169,3 +169,51 @@ export const useReadAllAlerts = () => {
     },
   });
 };
+
+
+export const useMasterSets = () =>
+  useQuery({
+    queryKey: ['master-sets'],
+    queryFn: ({ signal }) => api.masterSets(signal),
+    staleTime: minutes(2),
+  });
+
+export const useMasterSet = (id: number) =>
+  useQuery({
+    queryKey: ['master-set', id],
+    queryFn: ({ signal }) => api.masterSet(id, signal),
+    enabled: id > 0,
+    staleTime: minutes(2),
+  });
+
+export const useCreateMasterSet = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.createMasterSet,
+    onSuccess: async () => queryClient.invalidateQueries({ queryKey: ['master-sets'] }),
+  });
+};
+
+export const useUpdateMasterSetItem = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, input }: { id: number; input: import('./types').MasterSetItemUpdate }) => api.updateMasterSetItem(id, input),
+    onSuccess: async (_data, variables) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['master-set', variables.id] }),
+        queryClient.invalidateQueries({ queryKey: ['master-sets'] }),
+      ]);
+    },
+  });
+};
+
+export const useDeleteMasterSet = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.deleteMasterSet,
+    onSuccess: async () => queryClient.invalidateQueries({ queryKey: ['master-sets'] }),
+  });
+};
+
+export const useMasterSetAdvisor = () =>
+  useMutation({ mutationFn: api.masterSetAdvisor });
