@@ -245,6 +245,15 @@ export interface Account {
   mode: string;
 }
 
+export interface SoldComp {
+  id: string;
+  source: string;
+  title: string | null;
+  price: number;
+  soldAt: string;
+  url: string | null;
+}
+
 export interface MarketIntelligence {
   cardId: string;
   variant: string;
@@ -265,6 +274,11 @@ export interface MarketIntelligence {
   isStale: boolean;
   liquidity: string;
   liquidityReason: string;
+  soldComps30Days: number | null;
+  medianSold30Days: number | null;
+  lastSoldPrice: number | null;
+  lastSoldAt: string | null;
+  recentSoldComps: SoldComp[];
   reasons: string[];
 }
 
