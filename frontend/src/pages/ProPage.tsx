@@ -63,7 +63,7 @@ export default function ProPage() {
           name="Pro"
           price="$9.99/mo"
           description="For collectors making buy, sell, grade and trade decisions."
-          features={['Market Confidence with transparent reasons', 'Deal Analyzer and break-even math', 'Unlimited watchlist and threshold alerts', 'Personal dashboard', 'Longer signal context and model outlook']}
+          features={['Market Confidence with transparent reasons', 'Deal Analyzer and break-even math', 'Unlimited watchlist and threshold alerts', 'Unlimited Master Set trackers + AI Set Advisor', 'Personal dashboard', 'Longer signal context and model outlook']}
           actions={
             account?.isPro && account.billingConfigured ? (
               <button type="button" className="btn w-full bg-pokemon-pokeblue text-white" disabled={working !== null} onClick={manage}>
