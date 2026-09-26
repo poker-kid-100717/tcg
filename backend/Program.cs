@@ -90,7 +90,8 @@ builder.Services.AddDataProtection()
     .PersistKeysToDbContext<AppDbContext>();
 builder.Services.AddIdentityCore<AppUser>(options =>
     {
-        options.User.RequireUniqueEmail = true;
+        // Off because guests have no email; a unique index on users.normalized_email enforces it instead.
+        options.User.RequireUniqueEmail = false;
         options.Password.RequiredLength = 10;
         options.Password.RequireDigit = false;
         options.Password.RequireLowercase = false;

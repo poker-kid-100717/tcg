@@ -64,20 +64,35 @@ namespace PokemonTcgMarketplace.Backend.Tests
         }
 
         [Fact]
-        public async Task Search_needs_two_characters_and_escapes_the_query()
+        public async Task Search_needs_two_characters_and_reads_the_local_catalog()
         {
-            var set = fixture.Upstream.AddSet("srch", "Search Set", "Test Series", new DateOnly(2023, 1, 1), 2);
+            var set = fixture.Upstream.AddSet("srch", "Search Set", "Test Series", new DateOnly(2023, 1, 1), 3);
             fixture.Upstream.AddCard(set, "1", "Zygarde", "Rare", Today, ("holofoil", 3m));
             fixture.Upstream.AddCard(set, "2", "Zyzzyva", "Common", Today, ("normal", 1m));
+            fixture.Upstream.AddCard(set, "3", "Mega Zygarde", "Rare", Today, ("holofoil", 9m));
+            await RunSnapshot();
             var client = fixture.CreateClient();
 
             Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync("/api/cards?q=z")).StatusCode);
 
+            // Name prefix or word prefix, from Postgres rather than the upstream API.
+            var before = fixture.Upstream.Requests.Count;
             var results = await Get<SearchResults>("/api/cards?q=zyg");
-            Assert.Equal("Zygarde", Assert.Single(results.Cards).Name);
+            Assert.Equal(["Mega Zygarde", "Zygarde"], results.Cards.Where(c => c.Id.StartsWith("srch-")).Select(c => c.Name).Order());
+            Assert.Equal(before, fixture.Upstream.Requests.Count);
+
+            // LIKE wildcards in the query are literal text, not patterns.
+            Assert.DoesNotContain((await Get<SearchResults>("/api/cards?q=" + Uri.EscapeDataString("z%a"))).Cards, c => c.Id.StartsWith("srch-"));
+        }
+
+        [Fact]
+        public async Task Upstream_search_escapes_the_query()
+        {
+            using var scope = fixture.Factory.Services.CreateScope();
+            var client = scope.ServiceProvider.GetRequiredService<PokemonTcgClient>();
 
             // A quote can't close the term and add clauses of its own.
-            await client.GetAsync("/api/cards?q=" + Uri.EscapeDataString("zy\" OR set.id:x"));
+            await client.SearchCardsAsync("zy\" OR set.id:x", 1, 10, CancellationToken.None);
             var sent = fixture.Upstream.Requests.Last(u => u.Query.Contains("OR"));
             Assert.Contains(Uri.EscapeDataString("name:\"zy OR set.id:x*\""), sent.Query);
         }
@@ -242,7 +257,8 @@ namespace PokemonTcgMarketplace.Backend.Tests
             fixture.Upstream.Fail = true;
             try
             {
-                var response = await fixture.CreateClient().GetAsync("/api/cards?q=outage");
+                // A card the local catalog doesn't have yet goes upstream.
+                var response = await fixture.CreateClient().GetAsync("/api/cards/outage-1");
                 Assert.Equal(HttpStatusCode.BadGateway, response.StatusCode);
                 Assert.Contains("isn't responding", await response.Content.ReadAsStringAsync());
             }

@@ -276,7 +276,8 @@ namespace PokemonTCG.API.Migrations
             migrationBuilder.CreateIndex(
                 name: "EmailIndex",
                 table: "users",
-                column: "NormalizedEmail");
+                column: "NormalizedEmail",
+                unique: true);
 
             migrationBuilder.CreateIndex(
                 name: "UserNameIndex",

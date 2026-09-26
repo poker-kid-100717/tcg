@@ -94,8 +94,8 @@ public class CollectionService(AppDbContext db, CatalogReader catalog, PokemonTc
         var set = await db.Sets.AsNoTracking().FirstOrDefaultAsync(s => s.Id == setId, ct);
         var cards = await db.Cards.AsNoTracking().Where(c => c.SetId == setId).ToListAsync(ct);
         if (set is null || cards.Count == 0) return null;
-        var owned = await db.CollectionItems.AsNoTracking().Where(i => i.UserId == userId && i.CardId.StartsWith(setId))
-            .Where(i => cards.Select(c => c.Id).Contains(i.CardId)).ToListAsync(ct);
+        var cardIds = cards.Select(c => c.Id).ToList();
+        var owned = await db.CollectionItems.AsNoTracking().Where(i => i.UserId == userId && cardIds.Contains(i.CardId)).ToListAsync(ct);
         var ownedIds = owned.Select(o => o.CardId).ToHashSet();
         var missingCards = cards.Where(c => !ownedIds.Contains(c.Id)).ToList();
         var context = await LoadContextAsync(missingCards.Select(c => c.Id), ct);

@@ -161,6 +161,8 @@ namespace PokemonTCG.API.Data
                 user.ToTable("users");
                 user.Property(u => u.IsGuest).HasColumnName("is_guest");
                 user.Property(u => u.CreatedAt).HasColumnName("created_at");
+                // Guests have no email, so uniqueness is enforced here rather than by Identity's validator.
+                user.HasIndex(u => u.NormalizedEmail).HasDatabaseName("EmailIndex").IsUnique();
             });
             modelBuilder.Entity<Microsoft.AspNetCore.Identity.IdentityUserClaim<Guid>>().ToTable("user_claims");
             modelBuilder.Entity<Microsoft.AspNetCore.Identity.IdentityUserLogin<Guid>>().ToTable("user_logins");

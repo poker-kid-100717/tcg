@@ -12,7 +12,7 @@ using PokemonTCG.API.Data;
 namespace PokemonTCG.API.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20260926122911_Collections")]
+    [Migration("20260926123408_Collections")]
     partial class Collections
     {
         /// <inheritdoc />
@@ -172,6 +172,7 @@ namespace PokemonTCG.API.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("NormalizedEmail")
+                        .IsUnique()
                         .HasDatabaseName("EmailIndex");
 
                     b.HasIndex("NormalizedUserName")
