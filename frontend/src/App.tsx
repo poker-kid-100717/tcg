@@ -19,6 +19,7 @@ const DashboardPage = lazy(() => import('./pages/DashboardPage'));
 const ProPage = lazy(() => import('./pages/ProPage'));
 const MasterSetsPage = lazy(() => import('./pages/MasterSetsPage'));
 const MasterSetPage = lazy(() => import('./pages/MasterSetPage'));
+const AvailableInStoresPage = lazy(() => import('./pages/AvailableInStoresPage'));
 
 export default function App() {
   return (
@@ -36,6 +37,7 @@ export default function App() {
             <Route path="deal" element={<DealAnalyzerPage />} />
             <Route path="watchlist" element={<WatchlistPage />} />
             <Route path="dashboard" element={<DashboardPage />} />
+            <Route path="available-in-stores" element={<AvailableInStoresPage />} />
             <Route path="pro" element={<ProPage />} />
             <Route path="master-sets" element={<MasterSetsPage />} />
             <Route path="master-sets/:id" element={<MasterSetPage />} />

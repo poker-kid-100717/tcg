@@ -31,9 +31,16 @@ export default function DashboardPage() {
           <h1 className="text-3xl sm:text-4xl">Your market dashboard</h1>
           <p className="max-w-2xl text-slate-600">The cards and thresholds you care about, instead of a generic market feed.</p>
         </div>
-        <span className="rounded-full bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 ring-1 ring-slate-200">
-          {data.account.isPro ? 'Pro' : 'Free'} · {data.account.mode}
-        </span>
+        <div className="flex flex-wrap items-center gap-2">
+          {data.account.hasStoreFinder && (
+            <Link to="/available-in-stores" className="rounded-full bg-pokemon-yellow px-3 py-1.5 text-sm font-extrabold text-pokemon-pokeblue">
+              Available in Stores
+            </Link>
+          )}
+          <span className="rounded-full bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 ring-1 ring-slate-200">
+            {data.account.isPro ? 'Pro' : data.account.hasStoreFinder ? 'Store Finder' : 'Free'} · {data.account.mode}
+          </span>
+        </div>
       </header>
 
       <div className="grid gap-4 sm:grid-cols-3">

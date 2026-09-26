@@ -14,6 +14,7 @@ TCG Signal is a Pokémon card market-intelligence MVP. It starts with the same c
 - What happens to a deal after tax, shipping and selling costs?
 - Did a watched printing cross a price or movement threshold?
 - Does the forecasting model actually beat simply predicting “no change”?
+- Which supported stores near me have verifiable Pokémon TCG inventory right now?
 
 The application never invents transaction counts or sale prices. When transaction-level data is unavailable, liquidity is shown as **Unknown** rather than estimated from unrelated fields.
 
@@ -84,6 +85,22 @@ The application never invents transaction counts or sale prices. When transactio
   - backend subscription entitlements.
   - if Stripe is not configured, the site intentionally runs in **Founding Preview** mode with Pro features unlocked so the MVP remains fully testable.
 
+### Available in Stores / Store Finder
+
+Store Finder is a separate $4.99/month inventory product and the first independently deployable service boundary in TCG Signal.
+
+- Dedicated .NET 10 `Inventory.Service` and Cloudflare Container.
+- Browser geolocation with 5, 10, 25, 50 or 100 mile radius.
+- User latitude/longitude is used for the request and is not persisted.
+- Retailer-specific provider interface isolates failures and source changes.
+- Store-level evidence, observation time, source, distance and confidence are shown on every result.
+- Best Buy is the first live adapter because its official Developer API exposes near-real-time SKU availability for individual stores.
+- Low-stock observations are explicitly disclosed.
+- Quantity is never inferred or invented.
+- Target, Walmart and GameStop remain visible as planned coverage until a source meets the same evidence standard.
+- An unverified or failed provider produces no stock claims rather than a fallback guess.
+- Store Finder and Pro are separate entitlements; a Complete plan can unlock both.
+
 ### 30-day Outlook
 
 The existing ML.NET forecasting system is retained, but it is not the MVP's core value proposition.
@@ -148,27 +165,27 @@ Relevant docs:
 Browser
   |
   v
-Cloudflare Worker
+Cloudflare Worker / entitlement gateway
   |-- static React/Vite assets
-  |-- /api/* + /health -> Cloudflare Container
+  |-- core /api/* + /health ----------> TcgApi Container
+  |-- entitled /api/inventory/* ------> InventoryApi Container
   |
-  v
-ASP.NET Core 10 API
-  |-- PokemonTcgClient --------> Pokémon TCG API (catalog / compatibility)
-  |-- ScrydexClient -----------> Scrydex (optional premium enrichment)
-  |-- StripeBillingService ----> Stripe (optional billing)
+  +--> ASP.NET Core 10 Core API
+  |      |-- PokemonTcgClient --------> Pokémon TCG API
+  |      |-- ScrydexClient -----------> Scrydex
+  |      `-- StripeBillingService ----> Stripe
   |
-  v
+  `--> .NET 10 Inventory.Service
+         `-- IInventoryProvider
+              |-- BestBuyInventoryProvider --> official Best Buy API
+              |-- Target adapter ----------- planned / withheld
+              |-- Walmart adapter ---------- planned / withheld
+              `-- GameStop adapter --------- planned / withheld
+
 Neon PostgreSQL
-  |-- cards
-  |-- price_snapshots
-  |-- snapshot_runs
-  |-- prediction_runs
-  |-- price_predictions
-  |-- app_users
-  |-- subscriptions
-  |-- watchlist_items
-  `-- alert_events
+  |-- core pricing / account tables
+  |-- inventory_observations
+  `-- inventory_provider_runs
 
 11:15 UTC Cloudflare Cron -> POST /internal/snapshots
                               |
@@ -184,7 +201,8 @@ The Worker does **not** publicly forward `/internal/*`.
 | Layer | Technology |
 |---|---|
 | Frontend | React 19, TypeScript, Vite, TanStack Query, React Router, Tailwind CSS, Chart.js |
-| API | ASP.NET Core 10 minimal APIs |
+| Core API | ASP.NET Core 10 minimal APIs |
+| Inventory microservice | .NET 10 minimal API + provider adapters |
 | Data | PostgreSQL / Neon, EF Core 10, Npgsql |
 | Compatibility provider | Pokémon TCG API |
 | Premium provider | Scrydex (optional) |
@@ -240,6 +258,7 @@ If Stripe is not configured, every device receives Pro access in **Founding Prev
 | PUT/DELETE | `/api/watchlist/{id}` | Watch threshold management |
 | GET | `/api/alerts` | In-app alert feed |
 | GET | `/api/dashboard` | Personalized dashboard |
+| POST | `/api/inventory/nearby` | Entitled nearby inventory; coordinates stay in request body |
 | POST | `/api/billing/checkout` | Stripe Checkout |
 | POST | `/api/billing/portal` | Stripe Customer Portal |
 | POST | `/api/billing/webhook` | Signed Stripe events |
@@ -285,6 +304,8 @@ Billing__StripeSecretKey
 Billing__StripeWebhookSecret
 Billing__ProMonthlyPriceId
 Billing__ProAnnualPriceId
+Billing__StoreFinderMonthlyPriceId
+Billing__CompleteMonthlyPriceId
 Billing__SiteUrl
 ```
 
@@ -307,6 +328,7 @@ Optional data-provider secrets:
 | `POKEMONTCG_API_KEY` | Higher legacy Pokémon TCG API rate limit |
 | `SCRYDEX_API_KEY` | Scrydex market intelligence |
 | `SCRYDEX_TEAM_ID` | Scrydex team |
+| `BESTBUY_API_KEY` | Official Best Buy store-level inventory adapter |
 
 Optional billing secrets:
 
@@ -316,6 +338,8 @@ Optional billing secrets:
 | `STRIPE_WEBHOOK_SECRET` | Verify webhooks |
 | `STRIPE_PRO_MONTHLY_PRICE_ID` | Monthly Pro Price |
 | `STRIPE_PRO_ANNUAL_PRICE_ID` | Annual Pro Price |
+| `STRIPE_STORE_FINDER_MONTHLY_PRICE_ID` | $4.99 Store Finder Price |
+| `STRIPE_COMPLETE_MONTHLY_PRICE_ID` | Combined Complete plan Price |
 
 The deployment workflow always deploys the core app. Optional secrets are uploaded only when they exist, so missing Stripe or Scrydex credentials do not break deployment.
 
@@ -344,6 +368,10 @@ TCG Signal deliberately prefers an explicit unknown over false precision.
 - confidence explanations are deterministic.
 - ML predictions are withheld when validation fails to beat the baseline.
 - no promise that a card will appreciate or sell at a displayed value.
+- no store is labeled in stock without store-specific provider evidence.
+- no inventory quantity is inferred when a retailer does not provide it.
+- retailer failures are surfaced as coverage degradation, not stale stock claims.
+- user latitude/longitude is not persisted by Inventory.Service.
 
 ## Security notes
 

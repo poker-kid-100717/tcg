@@ -75,6 +75,11 @@ export function Layout() {
             <NavLink to="/dashboard" className={navClass}>
               Dashboard
             </NavLink>
+            {session.data?.hasStoreFinder && (
+              <NavLink to="/available-in-stores" className={navClass}>
+                Available in Stores
+              </NavLink>
+            )}
           </nav>
           <SearchForm className="order-last w-full lg:order-none lg:ml-auto lg:w-64" />
           <Link

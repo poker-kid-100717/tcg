@@ -6,21 +6,35 @@ vi.mock("@cloudflare/containers", () => ({ Container: class {} }));
 
 const { default: worker, PREDICTIONS_CRON } = await import("./index");
 
-function createEnv() {
+function createEnv(account: Record<string, unknown> = {}) {
   const apiRequests: Request[] = [];
+  const inventoryRequests: Request[] = [];
   const env = {
     ASSETS: { fetch: vi.fn(async () => new Response("<div id=\"root\"></div>")) },
     API: {
       getByName: vi.fn(() => ({
         fetch: async (req: Request) => {
           apiRequests.push(req);
-          return new Response("{}", { headers: { "content-type": "application/json" } });
+          const pathname = new URL(req.url).pathname;
+          return new Response(JSON.stringify(pathname === "/api/session" ? account : {}), {
+            headers: { "content-type": "application/json" },
+          });
+        },
+      })),
+    },
+    INVENTORY: {
+      getByName: vi.fn(() => ({
+        fetch: async (req: Request) => {
+          inventoryRequests.push(req);
+          return new Response(JSON.stringify({ listings: [] }), {
+            headers: { "content-type": "application/json" },
+          });
         },
       })),
     },
     TCG_DATABASE_URL: "postgres://example",
   };
-  return { env: env as any, apiRequests };
+  return { env: env as any, apiRequests, inventoryRequests };
 }
 
 describe("worker routing", () => {
@@ -55,6 +69,44 @@ describe("worker routing", () => {
 
     expect(env.ASSETS.fetch).toHaveBeenCalledOnce();
     expect(apiRequests).toHaveLength(0);
+  });
+
+  it("requires Store Finder entitlement before forwarding precise-location inventory requests", async () => {
+    const { env, apiRequests, inventoryRequests } = createEnv({ hasStoreFinder: false });
+
+    const response = await worker.fetch(
+      new Request("https://tcg.example.com/api/inventory/nearby", {
+        method: "POST",
+        body: JSON.stringify({ latitude: 35.1, longitude: -106.6, radiusMiles: 25 }),
+        headers: { "content-type": "application/json" },
+      }),
+      env,
+    );
+
+    expect(response.status).toBe(403);
+    expect(apiRequests).toHaveLength(1);
+    expect(new URL(apiRequests[0].url).pathname).toBe("/api/session");
+    expect(inventoryRequests).toHaveLength(0);
+  });
+
+  it("forwards inventory to the dedicated container only after entitlement succeeds", async () => {
+    const { env, apiRequests, inventoryRequests } = createEnv({ hasStoreFinder: true });
+
+    const response = await worker.fetch(
+      new Request("https://tcg.example.com/api/inventory/nearby", {
+        method: "POST",
+        body: JSON.stringify({ latitude: 35.1, longitude: -106.6, radiusMiles: 25 }),
+        headers: { "content-type": "application/json" },
+      }),
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    expect(apiRequests).toHaveLength(1);
+    expect(new URL(apiRequests[0].url).pathname).toBe("/api/session");
+    expect(inventoryRequests).toHaveLength(1);
+    expect(new URL(inventoryRequests[0].url).pathname).toBe("/api/inventory/nearby");
+    expect(env.INVENTORY.getByName).toHaveBeenCalledWith("inventory");
   });
 
   it("never exposes the snapshot job to the internet", async () => {

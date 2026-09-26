@@ -7,6 +7,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "pokemon-tcg-api", "backend\
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PokemonTcgMarketplace.Backend.Tests", "backend.Tests\PokemonTcgMarketplace.Backend.Tests.csproj", "{9EEB0D97-2D6F-453F-8B77-1EFFFFC23281}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Inventory.Service", "inventory\Inventory.Service.csproj", "{4F1B66C0-0E6B-4D28-AF1D-1C2E88C1D7A5}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Inventory.Service.Tests", "inventory.Tests\Inventory.Service.Tests.csproj", "{A1CDA111-12F4-4D12-BED6-75E21D633B44}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -24,5 +28,13 @@ Global
 		{9EEB0D97-2D6F-453F-8B77-1EFFFFC23281}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{9EEB0D97-2D6F-453F-8B77-1EFFFFC23281}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{9EEB0D97-2D6F-453F-8B77-1EFFFFC23281}.Release|Any CPU.Build.0 = Release|Any CPU
+		{4F1B66C0-0E6B-4D28-AF1D-1C2E88C1D7A5}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{4F1B66C0-0E6B-4D28-AF1D-1C2E88C1D7A5}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{4F1B66C0-0E6B-4D28-AF1D-1C2E88C1D7A5}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{4F1B66C0-0E6B-4D28-AF1D-1C2E88C1D7A5}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A1CDA111-12F4-4D12-BED6-75E21D633B44}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A1CDA111-12F4-4D12-BED6-75E21D633B44}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A1CDA111-12F4-4D12-BED6-75E21D633B44}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A1CDA111-12F4-4D12-BED6-75E21D633B44}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

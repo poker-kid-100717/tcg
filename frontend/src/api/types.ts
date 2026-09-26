@@ -241,7 +241,9 @@ export interface ModelSummary {
 export interface Account {
   id: string;
   billingConfigured: boolean;
+  storeFinderBillingConfigured: boolean;
   isPro: boolean;
+  hasStoreFinder: boolean;
   plan: string;
   subscriptionStatus: string | null;
   mode: string;
@@ -392,4 +394,45 @@ export interface MasterSetAiAdvice {
   model: string;
   generatedByAi: boolean;
   generatedAt: string;
+}
+
+
+export interface InventoryListing {
+  retailer: string;
+  storeId: string;
+  storeName: string;
+  address: string;
+  city: string;
+  region: string;
+  postalCode: string;
+  latitude: number;
+  longitude: number;
+  distanceMiles: number;
+  productSku: string;
+  productName: string;
+  category: string;
+  imageUrl: string | null;
+  productUrl: string | null;
+  price: number | null;
+  lowStock: boolean;
+  availability: string;
+  confidenceScore: number;
+  observedAt: string;
+  source: string;
+  evidence: string;
+}
+
+export interface InventoryProviderCoverage {
+  retailer: string;
+  status: string;
+  detail: string;
+  checkedAt: string | null;
+}
+
+export interface NearbyInventory {
+  checkedAt: string;
+  radiusMiles: number;
+  listings: InventoryListing[];
+  providers: InventoryProviderCoverage[];
+  accuracyPolicy: string;
 }

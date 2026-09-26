@@ -13,6 +13,7 @@ import type {
   MasterSetItemUpdate,
   MasterSetSummary,
   ModelSummary,
+  NearbyInventory,
   PredictionList,
   SearchResults,
   SetDetail,
@@ -82,6 +83,15 @@ export const api = {
     get<PredictionList>(`/predictions?direction=${direction}&limit=12`, signal),
   cardPredictions: (id: string, signal?: AbortSignal) => get<PredictionList>(`/cards/${enc(id)}/predictions`, signal),
   model: (signal?: AbortSignal) => get<ModelSummary>('/predictions/model', signal),
+  nearbyInventory: (lat: number, lng: number, radius: number, signal?: AbortSignal) =>
+    request<NearbyInventory>(
+      '/inventory/nearby',
+      {
+        method: 'POST',
+        body: JSON.stringify({ latitude: lat, longitude: lng, radiusMiles: radius }),
+      },
+      signal,
+    ),
 
   session: () => post<Account>('/session'),
   intelligence: (id: string, variant: string, signal?: AbortSignal) =>
@@ -100,6 +110,6 @@ export const api = {
   updateMasterSetItem: (id: number, input: MasterSetItemUpdate) => put<void>(`/master-sets/${id}/items`, input),
   deleteMasterSet: (id: number) => del<void>(`/master-sets/${id}`),
   masterSetAdvisor: (id: number) => post<MasterSetAiAdvice>(`/master-sets/${id}/advisor`),
-  checkout: (plan: 'monthly' | 'annual') => post<BillingLink>('/billing/checkout', { plan }),
+  checkout: (plan: 'monthly' | 'annual' | 'storefinder' | 'complete') => post<BillingLink>('/billing/checkout', { plan }),
   billingPortal: () => post<BillingLink>('/billing/portal'),
 };
