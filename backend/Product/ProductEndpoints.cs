@@ -284,7 +284,7 @@ public static class ProductEndpoints
             StripeBillingService stripe,
             CancellationToken ct) =>
         {
-            if (!options.IsConfigured)
+            if (!options.StripeConfigured)
                 return Results.Problem(statusCode: 503, title: "Billing is in preview mode");
             var user = await sessions.GetOrCreateAsync(context, ct);
             var subscription = await store.GetSubscriptionAsync(user.Id, ct);
