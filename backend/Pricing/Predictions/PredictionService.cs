@@ -21,6 +21,9 @@ public class PredictionService(AppDbContext db, PredictionOptions options, TimeP
     /// <summary>A card's outcome is its first price on or up to this many days after the horizon date.</summary>
     private const int OutcomeGraceDays = 5;
 
+    /// <summary>A printing's prediction starts from its most recent price within this many days of the latest snapshot.</summary>
+    private const int CurrentWindowDays = 7;
+
     public async Task<PredictionRunResult?> RunAsync(CancellationToken cancellationToken)
     {
         if (!await Gate.WaitAsync(0, cancellationToken)) return null;
@@ -91,25 +94,28 @@ public class PredictionService(AppDbContext db, PredictionOptions options, TimeP
         // outcome was already known before validation starts, so no outcome leaks across the split.
         var dates = new List<DateOnly>();
         for (var d = latest.Value; d >= earliest.Value; d = d.AddDays(-options.SampleEveryDays)) dates.Add(d);
-        dates.Reverse();
+        // Predictions start from each printing's most recent price in the last week: a snapshot stamps rows with
+        // TCGplayer's own update date, so not every printing in a complete run carries the newest date.
+        var currentFrom = latest.Value.AddDays(-(CurrentWindowDays - 1));
+        for (var d = currentFrom; d < latest.Value; d = d.AddDays(1)) if (!dates.Contains(d)) dates.Add(d);
+        dates.Sort();
         // A date is labelled only once its whole outcome window (horizon + grace days) has passed, so printings
         // that get their outcome price during the grace days aren't missing from the newest validation dates.
-        var labelled = dates.Where(d => d.AddDays(horizon + OutcomeGraceDays) <= latest.Value).ToList();
+        var labelled = dates.Where(d => d < currentFrom && d.AddDays(horizon + OutcomeGraceDays) <= latest.Value).ToList();
         var validationDates = labelled.TakeLast(Math.Max(1, (int)Math.Ceiling(labelled.Count * options.ValidationFraction))).ToHashSet();
         var validationStart = validationDates.Count > 0 ? validationDates.Min() : latest.Value;
         // A label can come from up to OutcomeGraceDays after the horizon (when a card has no price on the exact day),
         // so a training date's whole outcome window has to close before validation starts.
         var trainingDates = labelled.Where(d => d.AddDays(horizon + OutcomeGraceDays) <= validationStart).ToHashSet();
 
-        // Cap rows per day in the database, so memory stays bounded however much history there is. The latest day
-        // is never capped: every printing on it gets a prediction.
+        // Cap rows per day in the database, so memory stays bounded however much history there is. The last week
+        // is never capped: every printing in it gets a prediction.
         var perDay = Math.Max(1, options.MaxTrainingRows / Math.Max(1, labelled.Count));
-        var samples = await LoadSamplesAsync(dates.ToArray(), latest.Value, perDay, cancellationToken);
+        var samples = await LoadSamplesAsync(dates.ToArray(), currentFrom, perDay, cancellationToken);
         var species = await LoadSpeciesAsync(cancellationToken);
-        var premiums = samples.GroupBy(s => s.Date).ToDictionary(g => g.Key, g => PriceFeatures.ComputePremiums(g));
         ModelInput Input(SampleRow s) => new()
         {
-            Features = PriceFeatures.Vector(s, premiums[s.Date], species),
+            Features = PriceFeatures.Vector(s, species),
             Label = (float)Math.Clamp(s.Label ?? 0, -options.LabelClip, options.LabelClip),
         };
 
@@ -153,10 +159,13 @@ public class PredictionService(AppDbContext db, PredictionOptions options, TimeP
         // 2. It works: retrain on everything with a known outcome and predict from the latest prices.
         var final = PriceModel.Train(samples.Where(s => s.Label is not null && labelled.Contains(s.Date)).Select(Input).ToList(), options);
         run.Importance = ImportanceJson(final.Importance());
-        var current = samples.Where(s => s.Date == latest.Value).ToList();
+        var current = samples.Where(s => s.Date >= currentFrom)
+            .GroupBy(s => (s.CardId, s.Variant))
+            .Select(g => g.MaxBy(s => s.Date)!)
+            .ToList();
         var outputs = final.Predict(current.Select(Input).ToList());
 
-        var predictions = current.Zip(outputs, (s, o) => ToPrediction(run, s, o, premiums[s.Date], species)).ToList();
+        var predictions = current.Zip(outputs, (s, o) => ToPrediction(run, s, o, species)).ToList();
         run.Checkpoint = !await db.PredictionRuns.AnyAsync(
             r => r.Checkpoint && r.Status == PredictionStatus.Published && r.FinishedAt != null && r.AsOf > latest.Value.AddDays(-7),
             cancellationToken);
@@ -173,9 +182,9 @@ public class PredictionService(AppDbContext db, PredictionOptions options, TimeP
             .ExecuteDeleteAsync(cancellationToken);
     }
 
-    private PricePrediction ToPrediction(PredictionRun run, SampleRow row, ModelOutput output, Premiums premiums, IReadOnlyDictionary<int, Species> species)
+    private PricePrediction ToPrediction(PredictionRun run, SampleRow row, ModelOutput output, IReadOnlyDictionary<int, Species> species)
     {
-        var vector = PriceFeatures.Vector(row, premiums, species);
+        var vector = PriceFeatures.Vector(row, species);
         var reasons = output.FeatureContributions
             .Select((c, i) => (Contribution: c, Feature: i))
             .Where(c => Math.Abs(c.Contribution) >= 0.002)
@@ -247,7 +256,7 @@ public class PredictionService(AppDbContext db, PredictionOptions options, TimeP
         public decimal Actual { get; init; }
     }
 
-    private Task<List<SampleRow>> LoadSamplesAsync(DateOnly[] dates, DateOnly latest, int perDay, CancellationToken cancellationToken)
+    private Task<List<SampleRow>> LoadSamplesAsync(DateOnly[] dates, DateOnly uncappedFrom, int perDay, CancellationToken cancellationToken)
     {
         var horizon = options.HorizonDays;
         var grace = OutcomeGraceDays;
@@ -271,13 +280,28 @@ public class PredictionService(AppDbContext db, PredictionOptions options, TimeP
                 WINDOW w AS (PARTITION BY card_id, variant ORDER BY date RANGE BETWEEN INTERVAL '30 days' PRECEDING AND CURRENT ROW)
             ),
             ranked AS (
-                SELECT w.*, c.set_id,
+                SELECT w.*, c.set_id, c.rarity, c.national_dex, c.artist, ln(w.market)::float8 AS lp,
                        rank() OVER (PARTITION BY w.date, c.set_id ORDER BY w.market DESC) AS set_rank,
                        w.market / sum(w.market) OVER (PARTITION BY w.date, c.set_id) AS set_share
                 FROM windowed w
                 JOIN sample_dates sd ON sd.d = w.date
                 JOIN cards c ON c.id = w.card_id
                 WHERE w.market >= {minPrice}
+            ),
+            -- Premiums: how a group's median price compares with the whole day's median (log ratio), computed on
+            -- every priced printing that day before any sampling, and shrunk toward zero for small groups.
+            day_median AS (SELECT date, percentile_cont(0.5) WITHIN GROUP (ORDER BY lp) AS med FROM ranked GROUP BY date),
+            rarity_premium AS (
+                SELECT r.date, r.rarity, count(*) / (count(*) + 5.0) * (percentile_cont(0.5) WITHIN GROUP (ORDER BY r.lp) - min(d.med)) AS premium
+                FROM ranked r JOIN day_median d ON d.date = r.date WHERE r.rarity IS NOT NULL GROUP BY r.date, r.rarity
+            ),
+            pokemon_premium AS (
+                SELECT r.date, r.national_dex, count(*) / (count(*) + 5.0) * (percentile_cont(0.5) WITHIN GROUP (ORDER BY r.lp) - min(d.med)) AS premium
+                FROM ranked r JOIN day_median d ON d.date = r.date WHERE r.national_dex IS NOT NULL GROUP BY r.date, r.national_dex
+            ),
+            artist_premium AS (
+                SELECT r.date, r.artist, count(*) / (count(*) + 5.0) * (percentile_cont(0.5) WITHIN GROUP (ORDER BY r.lp) - min(d.med)) AS premium
+                FROM ranked r JOIN day_median d ON d.date = r.date WHERE r.artist IS NOT NULL GROUP BY r.date, r.artist
             ),
             capped AS (
                 -- A stable pseudo-random subset per day (set ranks above are computed on the full day first).
@@ -291,9 +315,13 @@ public class PredictionService(AppDbContext db, PredictionOptions options, TimeP
                    s.set_id AS "SetId", c.set_name AS "SetName", s.set_rank AS "SetRank", s.set_share AS "SetShare",
                    c.number AS "Number", c.rarity AS "Rarity", c.supertype AS "Supertype", c.subtypes AS "Subtypes",
                    c.national_dex AS "NationalDex", c.artist AS "Artist", c.set_released AS "SetReleased",
-                   c.set_printed_total AS "SetPrintedTotal"
+                   c.set_printed_total AS "SetPrintedTotal",
+                   rp.premium::float8 AS "RarityPremium", pp.premium::float8 AS "PokemonPremium", ap.premium::float8 AS "ArtistPremium"
             FROM capped s
             JOIN cards c ON c.id = s.card_id
+            LEFT JOIN rarity_premium rp ON rp.date = s.date AND rp.rarity = s.rarity
+            LEFT JOIN pokemon_premium pp ON pp.date = s.date AND pp.national_dex = s.national_dex
+            LEFT JOIN artist_premium ap ON ap.date = s.date AND ap.artist = s.artist
             LEFT JOIN LATERAL (SELECT p.market FROM price_snapshots p WHERE p.card_id = s.card_id AND p.variant = s.variant
                                AND p.date <= s.date - 7 AND p.date > s.date - 14 AND p.market > 0 ORDER BY p.date DESC LIMIT 1) m7 ON true
             LEFT JOIN LATERAL (SELECT p.market FROM price_snapshots p WHERE p.card_id = s.card_id AND p.variant = s.variant
@@ -303,7 +331,7 @@ public class PredictionService(AppDbContext db, PredictionOptions options, TimeP
             LEFT JOIN LATERAL (SELECT p.market FROM price_snapshots p WHERE p.card_id = s.card_id AND p.variant = s.variant
                                AND p.date >= s.date + {horizon} AND p.date < s.date + {horizon} + {grace} AND p.market > 0
                                ORDER BY p.date LIMIT 1) f ON true
-            WHERE s.date = {latest} OR s.pick <= {perDay}
+            WHERE s.date >= {uncappedFrom} OR s.pick <= {perDay}
             ORDER BY s.date, s.card_id, s.variant
             """).ToListAsync(cancellationToken);
     }

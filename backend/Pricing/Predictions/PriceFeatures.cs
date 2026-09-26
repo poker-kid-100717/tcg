@@ -34,16 +34,14 @@ public sealed class SampleRow
     public string? Artist { get; init; }
     public DateOnly? SetReleased { get; init; }
     public int? SetPrintedTotal { get; init; }
+    /// <summary>Group premiums (log ratio to the day's median card), computed in SQL over the whole day.</summary>
+    public double? RarityPremium { get; init; }
+    public double? PokemonPremium { get; init; }
+    public double? ArtistPremium { get; init; }
 
     /// <summary>What the model predicts: the log of the price ratio over the horizon.</summary>
     public double? Label => Future is > 0 ? Math.Log((double)(Future.Value / Market)) : null;
 }
-
-/// <summary>How much more (or less) a group's cards sell for than the typical card on the same day.</summary>
-public sealed record Premiums(
-    IReadOnlyDictionary<string, double> Rarity,
-    IReadOnlyDictionary<int, double> Pokemon,
-    IReadOnlyDictionary<string, double> Artist);
 
 /// <summary>
 /// Per-Pokémon facts: a display name, and the release dates of the sets its cards are in, so the number of
@@ -109,7 +107,7 @@ public static class PriceFeatures
         "ex", "EX", "GX", "V", "VMAX", "VSTAR", "V-UNION", "TAG TEAM", "BREAK", "LEGEND", "Radiant", "Prism Star", "MEGA", "Mega",
     };
 
-    public static float[] Vector(SampleRow row, Premiums premiums, IReadOnlyDictionary<int, Species> species)
+    public static float[] Vector(SampleRow row, IReadOnlyDictionary<int, Species> species)
     {
         var price = (double)row.Market;
         var v = new float[Count];
@@ -129,10 +127,10 @@ public static class PriceFeatures
         v[13] = IsSecret(row) ? 1 : 0;
         v[14] = (float)Math.Log(row.SetRank);
         v[15] = (float)row.SetShare;
-        v[16] = (float)(row.Rarity is { } r && premiums.Rarity.TryGetValue(r, out var rp) ? rp : 0);
-        v[17] = (float)(row.NationalDex is { } dex && premiums.Pokemon.TryGetValue(dex, out var pp) ? pp : 0);
+        v[16] = (float)(row.RarityPremium ?? 0);
+        v[17] = (float)(row.PokemonPremium ?? 0);
         v[18] = (float)Math.Log(1 + (row.NationalDex is { } d && species.TryGetValue(d, out var s) ? s.PrintingsAsOf(row.Date) : 0));
-        v[19] = (float)(row.Artist is { } a && premiums.Artist.TryGetValue(a, out var ap) ? ap : 0);
+        v[19] = (float)(row.ArtistPremium ?? 0);
         v[20] = row.Supertype == "Trainer" ? 1 : 0;
         v[21] = row.Supertype == "Energy" ? 1 : 0;
         v[22] = row.Subtypes?.Any(RuleBox.Contains) == true ? 1 : 0;
@@ -197,36 +195,4 @@ public static class PriceFeatures
 
     private static string Age(float years) =>
         years < 1 ? $"{Math.Max(1, (int)Math.Round(years * 12))} months" : $"{years:0.#} years";
-
-    /// <summary>
-    /// For each group (a rarity, a Pokémon, an artist): how its cards' median price compares with the median
-    /// card that day, as a log ratio, shrunk toward zero for small groups so three cards can't make an artist
-    /// look like a star.
-    /// </summary>
-    public static Premiums ComputePremiums(IEnumerable<SampleRow> sameDay)
-    {
-        var rows = sameDay.ToList();
-        if (rows.Count == 0) return new Premiums(new Dictionary<string, double>(), new Dictionary<int, double>(), new Dictionary<string, double>());
-        var overall = Median(rows.Select(r => Math.Log((double)r.Market)));
-
-        Dictionary<TKey, double> Premium<TKey>(IEnumerable<(TKey Key, SampleRow Row)> keyed) where TKey : notnull =>
-            keyed.GroupBy(k => k.Key, k => k.Row)
-                .ToDictionary(g => g.Key, g =>
-                {
-                    var n = g.Count();
-                    return n / (n + 5.0) * (Median(g.Select(r => Math.Log((double)r.Market))) - overall);
-                });
-
-        return new Premiums(
-            Premium(rows.Where(r => r.Rarity is not null).Select(r => (r.Rarity!, r))),
-            Premium(rows.Where(r => r.NationalDex is not null).Select(r => (r.NationalDex!.Value, r))),
-            Premium(rows.Where(r => r.Artist is not null).Select(r => (r.Artist!, r))));
-    }
-
-    private static double Median(IEnumerable<double> values)
-    {
-        var sorted = values.Order().ToArray();
-        var mid = sorted.Length / 2;
-        return sorted.Length % 2 == 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
-    }
 }

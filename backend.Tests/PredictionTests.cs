@@ -74,6 +74,16 @@ namespace PokemonTcgMarketplace.Backend.Tests
                     });
                 }
             }
+            // Two printings whose newest TCGplayer price is two days old: they still get predictions.
+            for (var i = 0; i < 2; i++)
+            {
+                var id = $"late-{i}";
+                db.Cards.Add(new Card { Id = id, Name = "Squirtle", Number = $"L{i}", SetId = "p0", SetName = "Prediction Set 0", Rarity = "Common", NationalDex = 7, Supertype = "Pokémon" });
+                for (var day = 0; day <= Days - 2; day++)
+                {
+                    db.PriceSnapshots.Add(new PriceSnapshot { CardId = id, Variant = "normal", Date = Today.AddDays(day - Days), Market = 4m + i, Low = 3.5m, Mid = 4m + i, High = 6m });
+                }
+            }
             await db.SaveChangesAsync();
 
             // Two checkpoints from an earlier model. The older one's outcome window (7 days + 5 days' grace) has
@@ -112,7 +122,7 @@ namespace PokemonTcgMarketplace.Backend.Tests
 
             Assert.Equal(PredictionStatus.Published, result.Status);
             Assert.True(result.Mae < result.BaselineMae, $"MAE {result.Mae} should beat no-change {result.BaselineMae}");
-            Assert.Equal(60, result.Predictions);
+            Assert.Equal(62, result.Predictions);
 
             var model = await Get<ModelSummary>("/api/predictions/model");
             Assert.Equal(PredictionStatus.Published, model.Status);
@@ -144,6 +154,8 @@ namespace PokemonTcgMarketplace.Backend.Tests
             Assert.Contains(card.Reasons, r => r.EffectPercent > 0);
 
             Assert.Empty((await Get<PredictionList>("/api/cards/nope-1/predictions")).Cards);
+            var late = Assert.Single((await Get<PredictionList>("/api/cards/late-0/predictions")).Cards);
+            Assert.Equal(4m, late.Current);
 
             // While a price snapshot is still writing, the day is incomplete: the run is skipped and the
             // published model stays in place.

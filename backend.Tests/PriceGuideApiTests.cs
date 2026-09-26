@@ -212,6 +212,31 @@ namespace PokemonTcgMarketplace.Backend.Tests
         }
 
         [Fact]
+        public async Task A_snapshot_that_fails_part_way_records_nothing()
+        {
+            var set = fixture.Upstream.AddSet("half1", "Half Set", "Test Series", new DateOnly(2021, 1, 1), 300);
+            for (var i = 1; i <= 300; i++) fixture.Upstream.AddCard(set, i.ToString(), $"Half {i}", "Rare", Today, ("holofoil", 5m));
+            var total = fixture.Upstream.Requests.Count;
+            // The first page of cards succeeds, then the card database goes down for good.
+            fixture.Upstream.FailAfterRequests = total + 1;
+            try
+            {
+                var response = await fixture.CreateClient().PostAsync("/internal/snapshots", null);
+                var result = (await response.Content.ReadFromJsonAsync<SnapshotResult>(Json))!;
+                Assert.Equal(SnapshotStatus.Failed, result.Status);
+            }
+            finally
+            {
+                fixture.Upstream.FailAfterRequests = null;
+            }
+
+            using var scope = fixture.Factory.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            Assert.False(await db.PriceSnapshots.AnyAsync(s => s.CardId.StartsWith("half1-")));
+            Assert.False(await db.Cards.AnyAsync(c => c.Id.StartsWith("half1-")));
+        }
+
+        [Fact]
         public async Task Upstream_outage_is_a_502_with_an_explanation()
         {
             fixture.Upstream.Fail = true;

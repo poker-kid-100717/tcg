@@ -59,6 +59,9 @@ public class PriceSnapshotService(
 
         try
         {
+            // The whole run is one transaction: a run that fails part-way leaves no half-recorded day behind
+            // (the price model and movers would otherwise read it as a complete one).
+            await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
             var today = DateOnly.FromDateTime(clock.GetUtcNow().UtcDateTime);
             for (var page = 1; ; page++)
             {
@@ -74,6 +77,7 @@ public class PriceSnapshotService(
 
             var cutoff = today.AddDays(-options.RetentionDays);
             await db.PriceSnapshots.Where(s => s.Date < cutoff).ExecuteDeleteAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
 
             run.Status = SnapshotStatus.Succeeded;
         }
@@ -103,8 +107,6 @@ public class PriceSnapshotService(
         if (rows.Count == 0) return 0;
 
         var tracked = rows.Select(r => r.card).DistinctBy(c => c.Id).ToList();
-
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
 
         await db.Database.ExecuteSqlRawAsync(
             """
@@ -163,7 +165,6 @@ public class PriceSnapshotService(
             ],
             cancellationToken);
 
-        await transaction.CommitAsync(cancellationToken);
         return rows.Count;
     }
 

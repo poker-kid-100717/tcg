@@ -97,8 +97,9 @@ worker/index.ts              Routing, container binding, daily Cron Trigger
 - **Daily snapshots on a Cron Trigger.** The container sleeps after 10 minutes idle, so an in-process timer
   wouldn't fire reliably. The Worker's `scheduled` handler wakes the container once a day and calls
   `/internal/snapshots`. A second trigger while a run is in progress gets `409`.
-- **Bulk upserts with Postgres `unnest`.** A run pages through every card, 250 at a time, and writes each page
-  with one `INSERT … SELECT FROM unnest(…) ON CONFLICT DO UPDATE` per table. The whole day is a few dozen
+- **Bulk upserts with Postgres `unnest`, in one transaction.** A run pages through every card, 250 at a time, and
+  writes each page with one `INSERT … SELECT FROM unnest(…) ON CONFLICT DO UPDATE` per table, all inside one
+  transaction, so a failed run leaves nothing half-written. The whole day is a few dozen
   statements, and rerunning a day overwrites that day's rows instead of duplicating them.
 - **Only meaningful prices are kept.** Printings under $0.50 (`Snapshots:MinMarketPrice`) aren't recorded, and
   snapshots older than 400 days are deleted after each run, which keeps the table inside a free Neon database.
@@ -124,8 +125,10 @@ worker/index.ts              Routing, container binding, daily Cron Trigger
     dates whose whole outcome window closed before that period started. Features use only what was known on the
     sample date: a Pokémon's printings are counted from set release dates up to then, and validation error is
     measured on real (unclipped) returns.
-  - **Only complete days:** the run is skipped if the latest price snapshot is still running or failed, so a
-    half-written day never reaches the model; the previous predictions stay up.
+  - **Only complete days:** a snapshot run is one database transaction, so a run that fails part-way records
+    nothing, and the prediction run is skipped while a snapshot is running or after one failed; the previous
+    predictions stay up. Rarity, Pokémon and artist premiums are computed in SQL over every priced printing that
+    day, before any sampling. Each printing is predicted from its most recent price in the last week.
   - **Bounded memory:** rows are capped per sample date inside the SQL query (a stable pseudo-random subset, taken
     after set ranks are computed on the full day), so the container never loads more than
     `Predictions:MaxTrainingRows` labelled rows. The latest day is never capped.
