@@ -76,12 +76,19 @@ builder.Services.AddScoped<PredictionService>();
 
 // TCG Signal MVP: device-bound collector profiles, watchlists, explainable market
 // intelligence and optional Stripe subscriptions. Without Stripe configuration,
- // the app deliberately runs as a full-feature founding preview.
+// the app deliberately runs as a full-feature founding preview.
 var billingOptions = builder.Configuration.GetSection(BillingOptions.SectionName).Get<BillingOptions>() ?? new();
 builder.Services.AddSingleton(billingOptions);
 builder.Services.AddSingleton(new ProductStore(normalizedConnectionString));
 builder.Services.AddScoped<SessionService>();
 builder.Services.AddScoped<EntitlementService>();
+var scrydexOptions = builder.Configuration.GetSection(ScrydexOptions.SectionName).Get<ScrydexOptions>() ?? new();
+builder.Services.AddSingleton(scrydexOptions);
+builder.Services.AddHttpClient<ScrydexClient>(client =>
+{
+    client.BaseAddress = new Uri(scrydexOptions.BaseUrl.EndsWith('/') ? scrydexOptions.BaseUrl : scrydexOptions.BaseUrl + "/");
+    client.Timeout = TimeSpan.FromSeconds(20);
+});
 builder.Services.AddScoped<MarketIntelligenceService>();
 builder.Services.AddScoped<AlertEvaluationService>();
 builder.Services.AddHttpClient<StripeBillingService>();
