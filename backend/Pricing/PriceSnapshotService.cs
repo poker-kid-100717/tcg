@@ -146,7 +146,9 @@ public class PriceSnapshotService(
             where card.Tcgplayer?.Prices is { Count: > 0 }
             from price in card.Tcgplayer!.Prices!
             where price.Value.Market is not null || price.Value.Low is not null || price.Value.Mid is not null
-            select (card, variant: price.Key, price: price.Value, date: card.Tcgplayer!.Updated ?? today)
+            // Every row is dated the day it was recorded, not the upstream update date: each successful run is then a
+            // complete day of prices, so day-to-day history, returns and per-day aggregates are over every printing.
+            select (card, variant: price.Key, price: price.Value, date: today)
         ).ToList();
         var rows = prices.Where(r => r.price.Market >= options.MinMarketPrice).ToList();
 
