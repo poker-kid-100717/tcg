@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 
 namespace PokemonTCG.API.Product;
@@ -122,7 +123,7 @@ public sealed class ScrydexClient(HttpClient http, ScrydexOptions options, ILogg
             $"pokemon/v1/cards/{Uri.EscapeDataString(cardId)}/listings" +
             $"?days={Math.Clamp(days, 7, 365)}" +
             $"&variant={Uri.EscapeDataString(variant)}" +
-            "&page=1&page_size=100";
+            "&condition=NM&page=1&page_size=100";
 
         using var document = await GetJsonAsync(path, cancellationToken);
         if (!document.RootElement.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Array)
@@ -189,7 +190,7 @@ public sealed class ScrydexClient(HttpClient http, ScrydexOptions options, ILogg
         date = default;
         var raw = GetString(element, property);
         return raw is not null &&
-               (DateOnly.TryParse(raw, out date) ||
-                DateOnly.TryParseExact(raw, "yyyy/MM/dd", out date));
+               (DateOnly.TryParseExact(raw, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out date) ||
+                DateOnly.TryParseExact(raw, "yyyy/MM/dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out date));
     }
 }
