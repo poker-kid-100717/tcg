@@ -70,27 +70,62 @@ describe('SetPage', () => {
     expect(names()).toEqual(['Charizard ex']);
   });
 
+  const progress = (kind: string, owned: number, total: number, cost: number) => ({
+    setId: 'sv3pt5', setName: '151', symbolUrl: null, logoUrl: null, kind, owned, total, completion: (owned / total) * 100, costToComplete: cost, unpriced: 0,
+  });
+  const checklist = (goal: string | null) => ({
+    setId: 'sv3pt5', printedTotal: 165, total: 207,
+    owned: [{ cardId: 'sv3pt5-1', quantity: 2, variants: ['normal'] }],
+    missing: [], costToCompleteBase: 812.4, costToCompleteAll: 2410,
+    master: {
+      owned: 1, total: 330, costToComplete: 3105.5, unpriced: 0,
+      missing: [
+        { cardId: 'sv3pt5-1', name: 'Bulbasaur', number: '1', imageUrl: null, secret: false, variant: 'reverseHolofoil', variantLabel: 'Reverse Holofoil', price: 1.25, tcgplayerUrl: null },
+      ],
+    },
+    goal,
+    progress: [progress('MainSet', 1, 165, 812.4), progress('FullSet', 1, 207, 2410), progress('MasterSet', 1, 330, 3105.5)],
+  });
+
   it('marks owned cards, shows what the rest costs, and filters to the cards still needed', async () => {
     mockApi({
       '/api/sets/sv3pt5': detail,
       '/api/account': { signedIn: true, isGuest: true, email: null },
-      '/api/collection/sets/sv3pt5': {
-        setId: 'sv3pt5', printedTotal: 165, total: 207,
-        owned: [{ cardId: 'sv3pt5-1', quantity: 2, variants: ['normal'] }],
-        missing: [], costToCompleteBase: 812.4, costToCompleteAll: 2410,
-      },
+      '/api/collection/sets/sv3pt5': checklist(null),
     });
     const user = userEvent.setup();
     renderRoute('/sets/sv3pt5', '/sets/:setId', <SetPage />);
 
-    expect(await screen.findByText('You have 1 of 165 (1%)')).toBeInTheDocument();
+    expect(await screen.findByText('1 of 165 cards (1%)')).toBeInTheDocument();
     expect(screen.getByText('$812.40')).toBeInTheDocument();
-    expect(screen.getByText('$2,410')).toBeInTheDocument();
     expect(screen.getByText('Have 2')).toBeInTheDocument();
 
     await user.selectOptions(screen.getByLabelText('Show'), 'missing');
     expect(names()).toEqual(['Ivysaur', 'Metapod', 'Charizard ex']);
     await user.selectOptions(screen.getByLabelText('Show'), 'owned');
     expect(names()).toEqual(['Bulbasaur']);
+  });
+
+  it('starts a master set goal and lists every printing still needed', async () => {
+    const fetchMock = mockApi({
+      '/api/sets/sv3pt5': detail,
+      '/api/account': { signedIn: true, isGuest: true, email: null },
+      '/api/collection/sets/sv3pt5': checklist('MasterSet'),
+      'PUT /api/collection/goals/sv3pt5': progress('MasterSet', 1, 330, 3105.5),
+    });
+    const user = userEvent.setup();
+    renderRoute('/sets/sv3pt5', '/sets/:setId', <SetPage />);
+
+    expect(await screen.findByRole('heading', { name: 'Your goal: master set' })).toBeInTheDocument();
+    expect(screen.getByText('1 of 330 printings (0%)')).toBeInTheDocument();
+    expect(screen.getByText('$3,106')).toBeInTheDocument();
+    const needed = screen.getByRole('list', { name: 'Printings you still need' });
+    expect(within(needed).getByRole('link')).toHaveTextContent('Bulbasaur #1 · Reverse Holofoil');
+    expect(screen.getByRole('button', { name: 'Master set' })).toHaveAttribute('aria-pressed', 'true');
+
+    await user.click(screen.getByRole('button', { name: 'Full set' }));
+    const put = fetchMock.mock.calls.find(([, init]) => init?.method === 'PUT');
+    expect(String(put?.[0])).toBe('/api/collection/goals/sv3pt5');
+    expect(JSON.parse(String(put?.[1]?.body))).toEqual({ kind: 'FullSet' });
   });
 });

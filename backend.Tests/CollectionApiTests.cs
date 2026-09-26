@@ -250,6 +250,10 @@ namespace PokemonTcgMarketplace.Backend.Tests
             await client.PostAsJsonAsync("/api/collection/items", new AddItemRequest($"{set}-1", "reverseHolofoil", CardCondition.HeavilyPlayed), Json);
             checklist = await Read<SetChecklist>(await client.GetAsync($"/api/collection/sets/{set}"));
             Assert.Equal((2, 4, 120.00m), (checklist.Master.Owned, checklist.Master.Total, checklist.Master.CostToComplete));
+            // The checklist also reports every kind of goal, so the set page can show whichever is picked.
+            Assert.Equal(
+                [(SetGoalKind.MainSet, 1, 2), (SetGoalKind.FullSet, 1, 3), (SetGoalKind.MasterSet, 2, 4)],
+                checklist.Progress.Select(p => (p.Kind, p.Owned, p.Total)));
         }
 
         [Fact]

@@ -112,7 +112,8 @@ public class CollectionService(AppDbContext db, CatalogReader catalog, PokemonTc
             }).ToList();
 
         var allPrices = await PricesByCardAsync(cardIds, ct);
-        var master = SetCompletion.Master(set, cards, allPrices, owned.Select(o => (o.CardId, o.Variant)).ToHashSet());
+        var ownedPrintings = owned.Select(o => (o.CardId, o.Variant)).ToHashSet();
+        var master = SetCompletion.Master(set, cards, allPrices, ownedPrintings);
         var goal = await db.SetGoals.AsNoTracking().Where(g => g.UserId == userId && g.SetId == setId).Select(g => (SetGoalKind?)g.Kind).FirstOrDefaultAsync(ct);
 
         return new SetChecklist(setId, set.PrintedTotal, cards.Count,
@@ -121,7 +122,8 @@ public class CollectionService(AppDbContext db, CatalogReader catalog, PokemonTc
             missing.Where(m => !m.Secret).Sum(m => m.Price ?? 0),
             missing.Sum(m => m.Price ?? 0),
             master,
-            goal);
+            goal,
+            Enum.GetValues<SetGoalKind>().Select(kind => SetCompletion.Goal(kind, set, cards, allPrices, ownedPrintings)).ToList());
     }
 
     // ---------------------------------------------------------------- set goals

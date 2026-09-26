@@ -5,6 +5,7 @@ import { useChecklist, useCollectionActions } from '../api/collection';
 import { useSet } from '../api/hooks';
 import type { CardSummary } from '../api/types';
 import { CardTile } from '../components/CardTile';
+import { SetGoalPanel } from '../components/collection/SetGoalPanel';
 import { ErrorState, Loading } from '../components/States';
 import { compareCollectorNumbers, formatDate, formatPrice, formatTotal } from '../lib/format';
 
@@ -64,7 +65,6 @@ export default function SetPage() {
   if (error) return <ErrorState error={error} onRetry={() => refetch()} />;
 
   const { set, stats } = data;
-  const ownedBase = data.cards.filter((c) => owned.has(c.id) && !isSecret(c.number, set.printedTotal)).length;
   const quickAdd = (card: CardSummary) =>
     add.mutate(
       { cardId: card.id, variant: card.priceVariant ?? 'normal' },
@@ -103,26 +103,7 @@ export default function SetPage() {
         />
       </dl>
 
-      {checklist.data && owned.size > 0 && (
-        <section aria-label="Your progress" className="panel mb-8 grid gap-3 p-5 md:grid-cols-[1fr_auto_auto] md:items-center">
-          <div className="grid gap-2">
-            <p className="font-semibold text-slate-900">
-              You have {ownedBase} of {set.printedTotal} ({Math.round((ownedBase / Math.max(1, set.printedTotal)) * 100)}%)
-            </p>
-            <span className="h-2 overflow-hidden rounded-full bg-slate-100">
-              <span className="block h-full rounded-full bg-pokemon-blue" style={{ width: `${Math.min(100, (ownedBase / Math.max(1, set.printedTotal)) * 100)}%` }} />
-            </span>
-          </div>
-          <div className="text-sm">
-            <p className="text-slate-500">To finish the main set</p>
-            <p className="price text-xl text-slate-900">{formatTotal(checklist.data.costToCompleteBase)}</p>
-          </div>
-          <div className="text-sm">
-            <p className="text-slate-500">Including secret rares</p>
-            <p className="price text-xl text-slate-900">{formatTotal(checklist.data.costToCompleteAll)}</p>
-          </div>
-        </section>
-      )}
+      <SetGoalPanel setId={set.id} setName={set.name} checklist={checklist.data} />
 
       <div className="mb-5 flex flex-wrap items-end gap-3">
         <label className="grid gap-1 text-sm font-medium">
@@ -227,5 +208,3 @@ function Stat({ label, value, hint, href }: { label: string; value: string; hint
   );
 }
 
-/** Numbered past the printed total ("SV 205/198"): a secret rare, left out of "the main set". */
-const isSecret = (number: string, printedTotal: number) => /^\d+$/.test(number) && Number(number) > printedTotal;

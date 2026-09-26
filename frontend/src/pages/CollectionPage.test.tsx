@@ -29,6 +29,7 @@ const view: CollectionView = {
   ],
   history: [{ date: '2026-09-24', value: 100 }, { date: '2026-09-25', value: 109 }],
   sets: [{ setId: 'sv3pt5', setName: '151', symbolUrl: null, releaseDate: '2023-09-22', owned: 2, printedTotal: 165, ownedAll: 2, total: 207, completion: 1.2, costToComplete: 410.5, unpricedMissing: 3 }],
+  goals: [{ setId: 'swsh7', setName: 'Evolving Skies', symbolUrl: null, logoUrl: null, kind: 'MasterSet', owned: 40, total: 412, completion: 9.7, costToComplete: 5120.4, unpriced: 2 }],
   signals: [{ cardId: 'sv3pt5-199', name: 'Mew ex', setName: '151', imageUrl: null, variant: 'holofoil', variantLabel: 'Holofoil', kind: 'ConsiderSelling', reasons: ['Down 18% over 30 days, steadily.'], valueEach: 42.5, quantity: 2 }],
   fees: { commissionRate: 0.1075, paymentRate: 0.025, perSaleFee: 0.3 },
   conditionFactors: { NearMint: 1, LightlyPlayed: 0.85, ModeratelyPlayed: 0.7, HeavilyPlayed: 0.5, Damaged: 0.35 },
@@ -76,6 +77,11 @@ describe('CollectionPage', () => {
     expect(progress).toHaveAttribute('href', '/sets/sv3pt5?show=missing');
     expect(progress).toHaveTextContent('about $410.50 to finish the main set (3 unpriced)');
     expect(screen.getByText('value chart with 2 points')).toBeInTheDocument();
+
+    const goal = screen.getByRole('link', { name: /Evolving Skies\s*Master set/ });
+    expect(goal).toHaveAttribute('href', '/sets/swsh7?show=missing');
+    expect(goal).toHaveTextContent('40 / 412');
+    expect(goal).toHaveTextContent('10% complete · about $5,120 to finish (2 unpriced)');
   });
 
   it('saves a condition change straight away', async () => {

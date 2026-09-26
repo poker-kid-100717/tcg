@@ -16,6 +16,10 @@ cards link to their TCGplayer listing.
   holding with inline quantity/condition/cost edits, and set progress with the **cost to finish each set**. Starts
   with no sign-up: the first add creates a guest collection, which can be saved with an email later (signing in from
   another device merges the guest's cards). A one-click sample collection shows it off. CSV export is spreadsheet-safe.
+- **Set goals and master sets:** pick a goal for any set (even before owning a card of it): **main set** (up to the
+  printed total), **full set** (secret rares included) or **master set** (every card in every printing it comes in:
+  normal, reverse holo, holo…). Each goal shows owned/total and what the rest costs; a master set lists every printing
+  still needed with one-click add.
 - **Wishlist:** target prices, a suggested target from the low end of 90 days of prices, and a flag when the market
   price or cheapest listing reaches it.
 
@@ -100,6 +104,7 @@ worker/index.ts              Routing, container binding, daily Cron Trigger
 | `GET` | `/api/collection` | Summary, holdings with values and price confidence, 90-day value history, set progress, heads-ups |
 | `POST`/`PATCH`/`DELETE` | `/api/collection/items[/{id}]` | Add (stacks matching copies, averaging cost), edit, remove |
 | `GET` | `/api/collection/cards/{id}`, `/api/collection/sets/{id}` | Copies of a card you own; a set checklist with the missing cards' prices and cost to complete |
+| `PUT`/`DELETE` | `/api/collection/goals/{setId}` | Start, re-target (`MainSet`, `FullSet`, `MasterSet`) or stop a set goal |
 | `POST` | `/api/collection/sample` | Fills an empty collection with ~24 real cards |
 | `GET` | `/api/collection/export.csv` | The collection as CSV |
 | `GET`/`POST`/`DELETE` | `/api/wishlist[/{id}]` | Wishlist with target prices |

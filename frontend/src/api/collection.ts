@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { api, ApiError } from './client';
-import type { AccountView, AddItemRequest, UpdateItemRequest } from './types';
+import type { AccountView, AddItemRequest, SetGoalKind, UpdateItemRequest } from './types';
 
 const SIGNED_OUT: AccountView = { signedIn: false, isGuest: false, email: null };
 
@@ -104,6 +104,14 @@ export function useCollectionActions() {
       ...after,
     }),
     unwish: useMutation({ mutationFn: (id: string) => api.unwish(id), ...after }),
+    setGoal: useMutation({
+      mutationFn: async ({ setId, kind }: { setId: string; kind: SetGoalKind }) => {
+        await ensureSession(client);
+        return api.setGoal(setId, kind);
+      },
+      ...after,
+    }),
+    removeGoal: useMutation({ mutationFn: (setId: string) => api.removeGoal(setId), ...after }),
   };
 }
 

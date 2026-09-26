@@ -4,11 +4,11 @@ import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
 import { useAccount, useCollection, useCollectionActions } from '../api/collection';
 import { useSets } from '../api/hooks';
-import type { CardCondition, CollectionEntry, CollectionSignal, CollectionView, SetProgress } from '../api/types';
+import type { CardCondition, CollectionEntry, CollectionSignal, CollectionView, GoalProgress, SetProgress } from '../api/types';
 import { ConfidenceBadge } from '../components/collection/ConfidenceBadge';
 import { ValueChart } from '../components/collection/ValueChart';
 import { ErrorState, Loading } from '../components/States';
-import { CONDITIONS, formatPercent } from '../lib/conditions';
+import { CONDITIONS, formatPercent, GOALS } from '../lib/conditions';
 import { formatChange, formatDate, formatPrice, formatTotal } from '../lib/format';
 
 export default function CollectionPage() {
@@ -17,7 +17,7 @@ export default function CollectionPage() {
 
   if (account.isPending || (account.data?.signedIn && collection.isPending)) return <Loading label="Loading your collection…" />;
   if (collection.error) return <ErrorState error={collection.error} onRetry={() => collection.refetch()} />;
-  if (!collection.data || collection.data.items.length === 0) return <EmptyCollection />;
+  if (!collection.data || (collection.data.items.length === 0 && collection.data.goals.length === 0)) return <EmptyCollection />;
   return <Dashboard view={collection.data} isGuest={!!account.data?.isGuest} />;
 }
 
@@ -188,9 +188,11 @@ function Dashboard({ view, isGuest }: { view: CollectionView; isGuest: boolean }
         <Signals signals={view.signals} />
       </div>
 
+      <Goals goals={view.goals} />
+
       <Holdings items={view.items} />
 
-      <SetsProgress sets={view.sets} />
+      <SetsProgress sets={view.sets.filter((s) => !view.goals.some((g) => g.setId === s.setId))} />
     </div>
   );
 }
@@ -389,6 +391,57 @@ function HoldingRow({ item }: { item: CollectionEntry }) {
   );
 }
 
+// ------------------------------------------------------------------ goals
+
+function Goals({ goals }: { goals: GoalProgress[] }) {
+  return (
+    <section aria-labelledby="goals-heading" className="grid gap-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h2 id="goals-heading" className="text-2xl">
+          Set goals
+        </h2>
+        <Link to="/sets" className="text-sm font-semibold text-pokemon-blue hover:underline">
+          Start a set →
+        </Link>
+      </div>
+      {goals.length === 0 ? (
+        <p className="panel p-5 text-sm text-slate-600">
+          Chasing a set? Open it and pick <strong>Main set</strong>, <strong>Full set</strong> or <strong>Master set</strong> (every
+          card in every printing) to track it here with what the rest costs.
+        </p>
+      ) : (
+        <ul className="grid gap-3 md:grid-cols-2">
+          {goals.map((goal) => (
+            <li key={goal.setId}>
+              <Link to={`/sets/${goal.setId}?show=missing`} className="panel grid gap-2 p-4 transition hover:border-pokemon-blue">
+                <span className="flex items-center justify-between gap-3">
+                  <span className="flex min-w-0 items-center gap-2 font-semibold text-slate-900">
+                    {goal.symbolUrl && <img src={goal.symbolUrl} alt="" className="h-5 w-5 object-contain" />}
+                    <span className="truncate">{goal.setName}</span>
+                    <span className="shrink-0 rounded-full bg-pokemon-pokeblue/10 px-2 py-0.5 text-[11px] font-bold text-pokemon-pokeblue">
+                      {GOALS.find((g) => g.value === goal.kind)!.label}
+                    </span>
+                  </span>
+                  <span className="text-sm tabular-nums text-slate-600">
+                    {goal.owned} / {goal.total}
+                  </span>
+                </span>
+                <span className="h-2 overflow-hidden rounded-full bg-slate-100">
+                  <span className="block h-full rounded-full bg-pokemon-blue" style={{ width: `${Math.min(100, goal.completion)}%` }} />
+                </span>
+                <span className="text-xs text-slate-500">
+                  {Math.round(goal.completion)}% complete · about {formatTotal(goal.costToComplete)} to finish
+                  {goal.unpriced > 0 && ` (${goal.unpriced} unpriced)`}
+                </span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
 // ------------------------------------------------------------------ sets
 
 function SetsProgress({ sets }: { sets: SetProgress[] }) {
@@ -396,7 +449,7 @@ function SetsProgress({ sets }: { sets: SetProgress[] }) {
   return (
     <section aria-labelledby="sets-heading" className="grid gap-4">
       <h2 id="sets-heading" className="text-2xl">
-        Set progress
+        Other sets you have cards from
       </h2>
       <ul className="grid gap-3 md:grid-cols-2">
         {sets.map((set) => (

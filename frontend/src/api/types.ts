@@ -332,6 +332,7 @@ export interface CollectionView {
   history: ValuePoint[];
   sets: SetProgress[];
   signals: CollectionSignal[];
+  goals: GoalProgress[];
   fees: { commissionRate: number; paymentRate: number; perSaleFee: number };
   conditionFactors: Record<CardCondition, number>;
 }
@@ -350,6 +351,29 @@ export interface MissingCard {
   tcgplayerUrl: string | null;
 }
 
+export type SetGoalKind = 'MainSet' | 'FullSet' | 'MasterSet';
+
+export interface MissingPrinting {
+  cardId: string;
+  name: string;
+  number: string;
+  imageUrl: string | null;
+  secret: boolean;
+  /** Null when no printing is known for the card, so any copy fills the slot. */
+  variant: string | null;
+  variantLabel: string;
+  price: number | null;
+  tcgplayerUrl: string | null;
+}
+
+export interface MasterChecklist {
+  owned: number;
+  total: number;
+  costToComplete: number;
+  unpriced: number;
+  missing: MissingPrinting[];
+}
+
 export interface SetChecklist {
   setId: string;
   printedTotal: number;
@@ -358,6 +382,24 @@ export interface SetChecklist {
   missing: MissingCard[];
   costToCompleteBase: number;
   costToCompleteAll: number;
+  master: MasterChecklist;
+  goal: SetGoalKind | null;
+  /** Progress toward each kind of goal. */
+  progress: GoalProgress[];
+}
+
+export interface GoalProgress {
+  setId: string;
+  setName: string;
+  symbolUrl: string | null;
+  logoUrl: string | null;
+  kind: SetGoalKind;
+  owned: number;
+  total: number;
+  /** 0–100. */
+  completion: number;
+  costToComplete: number;
+  unpriced: number;
 }
 
 export interface WishlistEntry {

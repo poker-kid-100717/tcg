@@ -127,7 +127,9 @@ public record SetChecklist(
     decimal CostToCompleteBase,
     decimal CostToCompleteAll,
     MasterChecklist Master,
-    SetGoalKind? Goal);
+    SetGoalKind? Goal,
+    /// <summary>Progress toward each kind of goal (main, full, master), whichever the collector has picked.</summary>
+    IReadOnlyList<GoalProgress> Progress);
 
 /// <summary>Progress toward a set the collector has chosen to complete.</summary>
 public record GoalProgress(

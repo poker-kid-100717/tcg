@@ -4,6 +4,8 @@ import type {
   CardDetail,
   CardOwnership,
   CollectionView,
+  GoalProgress,
+  SetGoalKind,
   SetChecklist,
   UpdateItemRequest,
   WishlistEntry,
@@ -43,7 +45,7 @@ async function get<T>(path: string, signal?: AbortSignal): Promise<T> {
  * State-changing calls. Always JSON with X-Requested-With: the API refuses anything else, which is what stops
  * another site from posting a form at a signed-in collector's account.
  */
-async function send<T>(method: 'POST' | 'PATCH' | 'DELETE', path: string, body?: unknown): Promise<T> {
+async function send<T>(method: 'POST' | 'PUT' | 'PATCH' | 'DELETE', path: string, body?: unknown): Promise<T> {
   const response = await fetch(`${BASE}${path}`, {
     method,
     headers: { accept: 'application/json', 'content-type': 'application/json', 'x-requested-with': 'fetch' },
@@ -100,6 +102,8 @@ export const api = {
   addItem: (request: AddItemRequest) => send<CardOwnership>('POST', '/collection/items', request),
   updateItem: (id: string, request: UpdateItemRequest) => send<CardOwnership>('PATCH', `/collection/items/${enc(id)}`, request),
   removeItem: (id: string) => send<void>('DELETE', `/collection/items/${enc(id)}`),
+  setGoal: (setId: string, kind: SetGoalKind) => send<GoalProgress>('PUT', `/collection/goals/${enc(setId)}`, { kind }),
+  removeGoal: (setId: string) => send<void>('DELETE', `/collection/goals/${enc(setId)}`),
   addSample: () => send<{ added: number }>('POST', '/collection/sample'),
   exportUrl: `${BASE}/collection/export.csv`,
 
