@@ -239,6 +239,9 @@ public class PredictionService(AppDbContext db, PredictionOptions options, TimeP
                 WHERE p.run_id = {past.Id} AND p.current > 0
                 """).ToListAsync(cancellationToken);
 
+            // The score and the deletion of the predictions it came from commit together: a crash in between
+            // can't leave a checkpoint unscored with its predictions already gone.
+            await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
             var actual = outcomes.Select(o => Math.Log((double)(o.Actual / o.Current))).ToArray();
             var predicted = outcomes.Select(o => Math.Log((double)(o.Predicted / o.Current))).ToArray();
             past.RealizedCount = outcomes.Count;
@@ -248,9 +251,10 @@ public class PredictionService(AppDbContext db, PredictionOptions options, TimeP
                 past.RealizedBaselineMae = actual.Average(Math.Abs);
                 past.RealizedDirectionAccuracy = DirectionAccuracy(actual, predicted);
             }
+            await db.SaveChangesAsync(cancellationToken);
             await db.PricePredictions.Where(p => p.RunId == past.Id).ExecuteDeleteAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
         }
-        await db.SaveChangesAsync(cancellationToken);
     }
 
     private sealed class Outcome
