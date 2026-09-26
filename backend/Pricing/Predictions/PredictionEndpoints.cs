@@ -197,8 +197,12 @@ public static class PredictionEndpoints
             if (row.ReferenceMarket is > 0 && row.ReferenceDate is not null && row.ReferenceDate < row.AsOf)
                 return Math.Round(((double)(row.Current / row.ReferenceMarket.Value) - 1d) * 100d, 1);
 
-            if (row.Mid is > 0 && row.Current > 0)
-                return Math.Round(((double)(row.Mid.Value / row.Current) - 1d) * 100d, 1);
+            // On day one there is no momentum yet. Use two different, clearly descriptive pieces of
+            // TCGplayer listing data so both sides of the Outlook page can still surface useful candidates:
+            // midpoint-above-market as upward pressure, and low-listing-below-market as downward pressure.
+            var comparison = direction == "down" ? row.Low : row.Mid;
+            if (comparison is > 0 && row.Current > 0)
+                return Math.Round(((double)(comparison.Value / row.Current) - 1d) * 100d, 1);
 
             return 0d;
         }
@@ -220,7 +224,9 @@ public static class PredictionEndpoints
                 var hasHistory = row.ReferenceMarket is > 0 && row.ReferenceDate is not null && row.ReferenceDate < row.AsOf;
                 var reason = hasHistory
                     ? $"Market price moved {Math.Abs(x.Change):0.0}% {(x.Change >= 0 ? "up" : "down")} since {row.ReferenceDate:MMM d}."
-                    : $"TCGplayer listing midpoint is {Math.Abs(x.Change):0.0}% {(x.Change >= 0 ? "above" : "below")} market.";
+                    : direction == "down"
+                        ? $"TCGplayer low listing is {Math.Abs(x.Change):0.0}% below market."
+                        : $"TCGplayer listing midpoint is {Math.Abs(x.Change):0.0}% above market.";
                 return new CardPrediction(
                     row.CardId, row.Name, row.Number, row.SetId, row.SetName, row.ImageUrl, row.TcgplayerUrl,
                     row.Variant, Prices.VariantLabel(row.Variant),
