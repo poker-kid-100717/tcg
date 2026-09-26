@@ -158,6 +158,8 @@ export default function AvailableInStoresPage() {
         <Loading label="Checking nearby retailer inventory…" />
       ) : inventory.error ? (
         <ErrorState error={inventory.error} onRetry={() => inventory.refetch()} />
+      ) : !inventory.data ? (
+        <Loading label="Checking nearby retailer inventory…" />
       ) : (
         <>
           <section className="grid gap-4">
