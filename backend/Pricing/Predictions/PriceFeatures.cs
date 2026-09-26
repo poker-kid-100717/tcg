@@ -45,8 +45,25 @@ public sealed record Premiums(
     IReadOnlyDictionary<int, double> Pokemon,
     IReadOnlyDictionary<string, double> Artist);
 
-/// <summary>Per-Pokémon facts that don't change day to day: a display name and how many cards feature it.</summary>
-public sealed record Species(string Name, int Printings);
+/// <summary>
+/// Per-Pokémon facts: a display name, and the release dates of the sets its cards are in, so the number of
+/// printings can be counted as of any date (a backtest mustn't know about cards released after its sample date).
+/// </summary>
+public sealed record Species(string Name, int[] ReleaseDays)
+{
+    /// <summary>How many of its cards had been released by <paramref name="date"/>. ReleaseDays is sorted.</summary>
+    public int PrintingsAsOf(DateOnly date)
+    {
+        int lo = 0, hi = ReleaseDays.Length;
+        while (lo < hi)
+        {
+            var mid = (lo + hi) / 2;
+            if (ReleaseDays[mid] <= date.DayNumber) lo = mid + 1;
+            else hi = mid;
+        }
+        return lo;
+    }
+}
 
 /// <summary>
 /// The model's inputs. Each feature is a number the gradient-boosted trees can split on, and has a
@@ -114,7 +131,7 @@ public static class PriceFeatures
         v[15] = (float)row.SetShare;
         v[16] = (float)(row.Rarity is { } r && premiums.Rarity.TryGetValue(r, out var rp) ? rp : 0);
         v[17] = (float)(row.NationalDex is { } dex && premiums.Pokemon.TryGetValue(dex, out var pp) ? pp : 0);
-        v[18] = (float)Math.Log(1 + (row.NationalDex is { } d && species.TryGetValue(d, out var s) ? s.Printings : 0));
+        v[18] = (float)Math.Log(1 + (row.NationalDex is { } d && species.TryGetValue(d, out var s) ? s.PrintingsAsOf(row.Date) : 0));
         v[19] = (float)(row.Artist is { } a && premiums.Artist.TryGetValue(a, out var ap) ? ap : 0);
         v[20] = row.Supertype == "Trainer" ? 1 : 0;
         v[21] = row.Supertype == "Energy" ? 1 : 0;
@@ -153,7 +170,7 @@ public static class PriceFeatures
             15 => $"{row.SetShare * 100:0.#}% of {row.SetName}'s total value",
             16 => $"{row.Rarity ?? "Unknown rarity"} cards sell for {Ratio(value)} the typical card",
             17 => pokemon is null ? "Not a Pokémon card" : $"{pokemon.Name} cards sell for {Ratio(value)} the typical card",
-            18 => pokemon is null ? "Not a Pokémon card" : $"{pokemon.Name} appears on {pokemon.Printings} cards",
+            18 => pokemon is null ? "Not a Pokémon card" : $"{pokemon.Name} appears on {pokemon.PrintingsAsOf(row.Date)} cards",
             19 => row.Artist is null ? "Unknown artist" : $"Art by {row.Artist}, whose cards sell for {Ratio(value)} the typical card",
             20 => value > 0 ? "Trainer card" : "Not a Trainer card",
             21 => value > 0 ? "Energy card" : "Not an Energy card",

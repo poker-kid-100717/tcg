@@ -19,7 +19,10 @@ public class PredictionOptions
     public int MinTrainingRows { get; set; } = 1000;
     public int MinValidationRows { get; set; } = 200;
 
-    /// <summary>Training rows are subsampled above this, to fit the container's memory.</summary>
+    /// <summary>
+    /// Upper bound on labelled rows loaded for training and validation, enforced in the query (spread evenly
+    /// across sample dates), to fit the container's memory.
+    /// </summary>
     public int MaxTrainingRows { get; set; } = 150_000;
 
     /// <summary>The model's validation error must beat "no change" by at least this fraction to be published.</summary>

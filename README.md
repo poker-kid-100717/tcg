@@ -119,13 +119,21 @@ worker/index.ts              Routing, container binding, daily Cron Trigger
     share of value in its set; rarity, Pokémon and artist premiums (how their cards sell against the typical card
     that day, shrunk toward zero for small groups); how many cards feature the Pokémon; Trainer, Energy and rule-box
     flags; and the printing. Pokémon popularity is measured from prices, so it updates itself.
-  - **Validation without leakage:** samples are taken weekly. The most recent 20% of dates with a known outcome
-    are held out, and training uses only dates whose outcome was known before that period started.
+  - **Validation without leakage:** samples are taken weekly. A sample's outcome is its first price in the 5 days
+    from the horizon date. The most recent 20% of dates with a known outcome are held out, and training uses only
+    dates whose whole outcome window closed before that period started. Features use only what was known on the
+    sample date: a Pokémon's printings are counted from set release dates up to then, and validation error is
+    measured on real (unclipped) returns.
+  - **Only complete days:** the run is skipped if the latest price snapshot is still running or failed, so a
+    half-written day never reaches the model; the previous predictions stay up.
+  - **Bounded memory:** rows are capped per sample date inside the SQL query (a stable pseudo-random subset, taken
+    after set ranks are computed on the full day), so the container never loads more than
+    `Predictions:MaxTrainingRows` labelled rows. The latest day is never capped.
   - **Publish rule:** the model has to beat predicting "no change" on the held-out weeks by at least 2%, or its
     predictions are withheld and the page says why. Each prediction's range comes from the 10th and 90th
     percentile of held-out errors.
-  - **Track record:** one run a week keeps its predictions. When their 30 days are up, the next run scores them
-    against actual prices and drops the rows. Other runs' rows are dropped once a newer run publishes, which keeps
+  - **Track record:** one run a week keeps its predictions. Once their 30 days plus the 5-day outcome window are
+    up, the next run scores them against actual prices and drops the rows. Other runs' rows are dropped once a newer run publishes, which keeps
     the table small.
   - **Cold start:** training and testing a 30-day model needs about 74 days of prices; until then the Outlook page
     says how many days it has.

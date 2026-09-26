@@ -18,6 +18,9 @@ public class PredictionService(AppDbContext db, PredictionOptions options, TimeP
     private static readonly SemaphoreSlim Gate = new(1, 1);
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
+    /// <summary>A card's outcome is its first price on or up to this many days after the horizon date.</summary>
+    private const int OutcomeGraceDays = 5;
+
     public async Task<PredictionRunResult?> RunAsync(CancellationToken cancellationToken)
     {
         if (!await Gate.WaitAsync(0, cancellationToken)) return null;
@@ -58,6 +61,19 @@ public class PredictionService(AppDbContext db, PredictionOptions options, TimeP
     private async Task TrainAndPredictAsync(PredictionRun run, CancellationToken cancellationToken)
     {
         var horizon = options.HorizonDays;
+
+        // The snapshot writes page by page, so while it's running (or after it failed part-way) the newest day is
+        // incomplete. Training on it would predict for only some cards and skew each day's premiums and set ranks.
+        var lastSnapshot = await db.SnapshotRuns.AsNoTracking().OrderByDescending(r => r.Id).FirstOrDefaultAsync(cancellationToken);
+        if (lastSnapshot is not null && lastSnapshot.Status != SnapshotStatus.Succeeded)
+        {
+            run.Status = PredictionStatus.Skipped;
+            run.Message = lastSnapshot.Status == SnapshotStatus.Running
+                ? "Today's price snapshot is still running; the current predictions stay until it finishes."
+                : "Today's price snapshot failed; the current predictions stay until a snapshot succeeds.";
+            return;
+        }
+
         var latest = await db.PriceSnapshots.MaxAsync(s => (DateOnly?)s.Date, cancellationToken);
         var earliest = await db.PriceSnapshots.MinAsync(s => (DateOnly?)s.Date, cancellationToken);
         if (latest is null || earliest is null)
@@ -79,9 +95,14 @@ public class PredictionService(AppDbContext db, PredictionOptions options, TimeP
         var labelled = dates.Where(d => d.AddDays(horizon) <= latest.Value).ToList();
         var validationDates = labelled.TakeLast(Math.Max(1, (int)Math.Ceiling(labelled.Count * options.ValidationFraction))).ToHashSet();
         var validationStart = validationDates.Count > 0 ? validationDates.Min() : latest.Value;
-        var trainingDates = labelled.Where(d => d.AddDays(horizon) <= validationStart).ToHashSet();
+        // A label can come from up to OutcomeGraceDays after the horizon (when a card has no price on the exact day),
+        // so a training date's whole outcome window has to close before validation starts.
+        var trainingDates = labelled.Where(d => d.AddDays(horizon + OutcomeGraceDays) <= validationStart).ToHashSet();
 
-        var samples = await LoadSamplesAsync(dates.ToArray(), cancellationToken);
+        // Cap rows per day in the database, so memory stays bounded however much history there is. The latest day
+        // is never capped: every printing on it gets a prediction.
+        var perDay = Math.Max(1, options.MaxTrainingRows / Math.Max(1, labelled.Count));
+        var samples = await LoadSamplesAsync(dates.ToArray(), latest.Value, perDay, cancellationToken);
         var species = await LoadSpeciesAsync(cancellationToken);
         var premiums = samples.GroupBy(s => s.Date).ToDictionary(g => g.Key, g => PriceFeatures.ComputePremiums(g));
         ModelInput Input(SampleRow s) => new()
@@ -90,7 +111,7 @@ public class PredictionService(AppDbContext db, PredictionOptions options, TimeP
             Label = (float)Math.Clamp(s.Label ?? 0, -options.LabelClip, options.LabelClip),
         };
 
-        var training = Subsample(samples.Where(s => trainingDates.Contains(s.Date) && s.Label is not null).ToList());
+        var training = samples.Where(s => trainingDates.Contains(s.Date) && s.Label is not null).ToList();
         var validation = samples.Where(s => validationDates.Contains(s.Date) && s.Label is not null).ToList();
         run.TrainingRows = training.Count;
         run.ValidationRows = validation.Count;
@@ -110,7 +131,8 @@ public class PredictionService(AppDbContext db, PredictionOptions options, TimeP
         var trial = PriceModel.Train(training.Select(Input).ToList(), options);
         var validationInputs = validation.Select(Input).ToList();
         var scores = trial.Predict(validationInputs).Select(o => (double)o.Score).ToArray();
-        var actual = validationInputs.Select(i => (double)i.Label).ToArray();
+        // Clipping keeps glitches out of the training loss, but the model is judged on what actually happened.
+        var actual = validation.Select(s => s.Label!.Value).ToArray();
         run.Mae = actual.Zip(scores, (a, p) => Math.Abs(a - p)).Average();
         run.BaselineMae = actual.Average(Math.Abs);
         run.DirectionAccuracy = DirectionAccuracy(actual, scores);
@@ -127,7 +149,7 @@ public class PredictionService(AppDbContext db, PredictionOptions options, TimeP
         }
 
         // 2. It works: retrain on everything with a known outcome and predict from the latest prices.
-        var final = PriceModel.Train(Subsample(samples.Where(s => s.Label is not null && labelled.Contains(s.Date)).ToList()).Select(Input).ToList(), options);
+        var final = PriceModel.Train(samples.Where(s => s.Label is not null && labelled.Contains(s.Date)).Select(Input).ToList(), options);
         run.Importance = ImportanceJson(final.Importance());
         var current = samples.Where(s => s.Date == latest.Value).ToList();
         var outputs = final.Predict(current.Select(Input).ToList());
@@ -182,10 +204,11 @@ public class PredictionService(AppDbContext db, PredictionOptions options, TimeP
             .Where(r => r.Checkpoint && r.RealizedCount == null && r.AsOf != null)
             .ToListAsync(cancellationToken);
 
-        foreach (var past in due.Where(r => r.AsOf!.Value.AddDays(r.HorizonDays) <= latest))
+        // Wait until the whole outcome window has passed, so a card missing a price on the exact day still counts.
+        foreach (var past in due.Where(r => r.AsOf!.Value.AddDays(r.HorizonDays + OutcomeGraceDays) <= latest))
         {
             var target = past.AsOf!.Value.AddDays(past.HorizonDays);
-            var until = target.AddDays(5);
+            var until = target.AddDays(OutcomeGraceDays);
             var outcomes = await db.Database.SqlQuery<Outcome>($"""
                 SELECT p.current AS "Current", p.predicted AS "Predicted", f.market AS "Actual"
                 FROM price_predictions p
@@ -218,9 +241,10 @@ public class PredictionService(AppDbContext db, PredictionOptions options, TimeP
         public decimal Actual { get; init; }
     }
 
-    private Task<List<SampleRow>> LoadSamplesAsync(DateOnly[] dates, CancellationToken cancellationToken)
+    private Task<List<SampleRow>> LoadSamplesAsync(DateOnly[] dates, DateOnly latest, int perDay, CancellationToken cancellationToken)
     {
         var horizon = options.HorizonDays;
+        var grace = OutcomeGraceDays;
         var minPrice = options.MinPrice;
         return db.Database.SqlQuery<SampleRow>($"""
             WITH sample_dates AS (SELECT unnest({dates}) AS d),
@@ -240,7 +264,7 @@ public class PredictionService(AppDbContext db, PredictionOptions options, TimeP
                 FROM daily
                 WINDOW w AS (PARTITION BY card_id, variant ORDER BY date RANGE BETWEEN INTERVAL '30 days' PRECEDING AND CURRENT ROW)
             ),
-            samples AS (
+            ranked AS (
                 SELECT w.*, c.set_id,
                        rank() OVER (PARTITION BY w.date, c.set_id ORDER BY w.market DESC) AS set_rank,
                        w.market / sum(w.market) OVER (PARTITION BY w.date, c.set_id) AS set_share
@@ -248,6 +272,11 @@ public class PredictionService(AppDbContext db, PredictionOptions options, TimeP
                 JOIN sample_dates sd ON sd.d = w.date
                 JOIN cards c ON c.id = w.card_id
                 WHERE w.market >= {minPrice}
+            ),
+            capped AS (
+                -- A stable pseudo-random subset per day (set ranks above are computed on the full day first).
+                SELECT *, row_number() OVER (PARTITION BY date ORDER BY md5(card_id || variant || date::text)) AS pick
+                FROM ranked
             )
             SELECT s.card_id AS "CardId", s.variant AS "Variant", s.date AS "Date", s.market AS "Market",
                    s.low AS "Low", s.mid AS "Mid", s.high AS "High",
@@ -257,7 +286,7 @@ public class PredictionService(AppDbContext db, PredictionOptions options, TimeP
                    c.number AS "Number", c.rarity AS "Rarity", c.supertype AS "Supertype", c.subtypes AS "Subtypes",
                    c.national_dex AS "NationalDex", c.artist AS "Artist", c.set_released AS "SetReleased",
                    c.set_printed_total AS "SetPrintedTotal"
-            FROM samples s
+            FROM capped s
             JOIN cards c ON c.id = s.card_id
             LEFT JOIN LATERAL (SELECT p.market FROM price_snapshots p WHERE p.card_id = s.card_id AND p.variant = s.variant
                                AND p.date <= s.date - 7 AND p.date > s.date - 14 AND p.market > 0 ORDER BY p.date DESC LIMIT 1) m7 ON true
@@ -266,35 +295,30 @@ public class PredictionService(AppDbContext db, PredictionOptions options, TimeP
             LEFT JOIN LATERAL (SELECT p.market FROM price_snapshots p WHERE p.card_id = s.card_id AND p.variant = s.variant
                                AND p.date <= s.date - 90 AND p.date > s.date - 110 AND p.market > 0 ORDER BY p.date DESC LIMIT 1) m90 ON true
             LEFT JOIN LATERAL (SELECT p.market FROM price_snapshots p WHERE p.card_id = s.card_id AND p.variant = s.variant
-                               AND p.date >= s.date + {horizon} AND p.date < s.date + {horizon} + 5 AND p.market > 0
+                               AND p.date >= s.date + {horizon} AND p.date < s.date + {horizon} + {grace} AND p.market > 0
                                ORDER BY p.date LIMIT 1) f ON true
+            WHERE s.date = {latest} OR s.pick <= {perDay}
             ORDER BY s.date, s.card_id, s.variant
             """).ToListAsync(cancellationToken);
     }
 
     private async Task<IReadOnlyDictionary<int, Species>> LoadSpeciesAsync(CancellationToken cancellationToken)
     {
-        // A Pokémon's plainest card name ("Charizard", not "Dark Charizard" or "Charizard ex") names it.
+        // A Pokémon's plainest card name ("Charizard", not "Dark Charizard" or "Charizard ex") names it; its cards'
+        // set release dates let the model count its printings as of each sample date.
         var rows = await db.Database.SqlQuery<SpeciesRow>($"""
-            SELECT national_dex AS "Dex", (array_agg(name ORDER BY length(name), name))[1] AS "Name", count(*)::int AS "Printings"
+            SELECT national_dex AS "Dex", (array_agg(name ORDER BY length(name), name))[1] AS "Name",
+                   array_agg(set_released ORDER BY set_released) FILTER (WHERE set_released IS NOT NULL) AS "Released"
             FROM cards WHERE national_dex IS NOT NULL GROUP BY national_dex
             """).ToListAsync(cancellationToken);
-        return rows.ToDictionary(r => r.Dex, r => new Species(r.Name, r.Printings));
+        return rows.ToDictionary(r => r.Dex, r => new Species(r.Name, (r.Released ?? []).Select(d => d.DayNumber).ToArray()));
     }
 
     private sealed class SpeciesRow
     {
         public int Dex { get; init; }
         public required string Name { get; init; }
-        public int Printings { get; init; }
-    }
-
-    /// <summary>Keeps a deterministic, evenly spread subset when there are more rows than the container should hold.</summary>
-    private List<SampleRow> Subsample(List<SampleRow> rows)
-    {
-        if (rows.Count <= options.MaxTrainingRows) return rows;
-        var step = (double)rows.Count / options.MaxTrainingRows;
-        return Enumerable.Range(0, options.MaxTrainingRows).Select(i => rows[(int)(i * step)]).ToList();
+        public DateOnly[]? Released { get; init; }
     }
 
     /// <summary>Of the moves bigger than 5% either way, the share whose direction was predicted correctly.</summary>

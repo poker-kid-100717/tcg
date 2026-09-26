@@ -69,15 +69,21 @@ namespace PokemonTcgMarketplace.Backend.Tests
             }
             await db.SaveChangesAsync();
 
-            // A week-old checkpoint from an earlier model, due to be scored against what happened.
+            // Two checkpoints from an earlier model. The older one's outcome window (7 days + 5 days' grace) has
+            // passed, so it gets scored; the newer one's hasn't, so it waits.
             var past = new PredictionRun
             {
-                StartedAt = DateTimeOffset.UtcNow.AddDays(-10), FinishedAt = DateTimeOffset.UtcNow.AddDays(-10), Status = PredictionStatus.Published,
-                AsOf = Today.AddDays(-10), HorizonDays = 7, Checkpoint = true,
+                StartedAt = DateTimeOffset.UtcNow.AddDays(-13), FinishedAt = DateTimeOffset.UtcNow.AddDays(-13), Status = PredictionStatus.Published,
+                AsOf = Today.AddDays(-13), HorizonDays = 7, Checkpoint = true,
             };
+            db.PredictionRuns.Add(new PredictionRun
+            {
+                StartedAt = DateTimeOffset.UtcNow.AddDays(-8), FinishedAt = DateTimeOffset.UtcNow.AddDays(-8), Status = PredictionStatus.Published,
+                AsOf = Today.AddDays(-8), HorizonDays = 7, Checkpoint = true,
+            });
             db.PredictionRuns.Add(past);
             await db.SaveChangesAsync();
-            var then = db.PriceSnapshots.Local.Single(s => s.CardId == "p0-0" && s.Date == Today.AddDays(-10)).Market!.Value;
+            var then = db.PriceSnapshots.Local.Single(s => s.CardId == "p0-0" && s.Date == Today.AddDays(-13)).Market!.Value;
             db.PricePredictions.Add(new PricePrediction
             {
                 RunId = past.Id, CardId = "p0-0", Variant = "holofoil", Current = then, Predicted = then * 1.07m, Low = then, High = then * 1.2m,
@@ -110,7 +116,7 @@ namespace PokemonTcgMarketplace.Backend.Tests
             Assert.InRange(model.Importance.Sum(f => f.Weight), 99, 101);
             // The old checkpoint was scored against the prices a week later, and its rows cleaned up.
             var scored = Assert.Single(model.TrackRecord);
-            Assert.Equal(Today.AddDays(-10), scored.AsOf);
+            Assert.Equal(Today.AddDays(-13), scored.AsOf);
             Assert.Equal(1, scored.Count);
 
             var up = await Get<PredictionList>("/api/predictions?direction=up&limit=10&minPrice=1");
@@ -129,6 +135,30 @@ namespace PokemonTcgMarketplace.Backend.Tests
             Assert.Contains(card.Reasons, r => r.EffectPercent > 0);
 
             Assert.Empty((await Get<PredictionList>("/api/cards/nope-1/predictions")).Cards);
+
+            // While a price snapshot is still writing, the day is incomplete: the run is skipped and the
+            // published model stays in place.
+            using (var scope = fixture.Factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                db.SnapshotRuns.Add(new SnapshotRun { StartedAt = DateTimeOffset.UtcNow, Status = SnapshotStatus.Running });
+                await db.SaveChangesAsync();
+            }
+            Assert.Equal(PredictionStatus.Skipped, (await Run()).Status);
+            Assert.Equal(PredictionStatus.Published, (await Get<ModelSummary>("/api/predictions/model")).Status);
+            Assert.Equal(10, (await Get<PredictionList>("/api/predictions?direction=up&limit=10&minPrice=1")).Cards.Count);
+        }
+
+        [Fact]
+        public void Printings_are_counted_as_of_the_sample_date()
+        {
+            var day = (DateOnly d) => d.DayNumber;
+            var pikachu = new Species("Pikachu", [day(new(2020, 1, 1)), day(new(2022, 6, 1)), day(new(2022, 6, 1)), day(new(2025, 3, 1))]);
+            Assert.Equal(0, pikachu.PrintingsAsOf(new(2019, 12, 31)));
+            Assert.Equal(1, pikachu.PrintingsAsOf(new(2020, 1, 1)));
+            Assert.Equal(3, pikachu.PrintingsAsOf(new(2022, 6, 1)));
+            Assert.Equal(3, pikachu.PrintingsAsOf(new(2025, 2, 28)));
+            Assert.Equal(4, pikachu.PrintingsAsOf(new(2026, 1, 1)));
         }
     }
 }

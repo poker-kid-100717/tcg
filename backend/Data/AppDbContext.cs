@@ -68,6 +68,8 @@ namespace PokemonTCG.API.Data
         Withheld,
         /// <summary>Not enough price history to train and validate yet.</summary>
         InsufficientHistory,
+        /// <summary>The latest price snapshot hadn't finished (or failed), so the previous model's predictions stay.</summary>
+        Skipped,
         Failed,
     }
 

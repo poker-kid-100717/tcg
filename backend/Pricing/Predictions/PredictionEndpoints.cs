@@ -125,10 +125,10 @@ public static class PredictionEndpoints
                 : Results.Conflict(new { message = "A prediction run is already in progress." }));
     }
 
-    /// <summary>The latest run that finished (a failed run keeps the previous model's answer showing).</summary>
+    /// <summary>The latest run that finished (a failed or skipped run keeps the previous model's answer showing).</summary>
     private static Task<PredictionRun?> CurrentRunAsync(AppDbContext db, CancellationToken ct) =>
         db.PredictionRuns.AsNoTracking()
-            .Where(r => r.FinishedAt != null && r.Status != PredictionStatus.Failed && r.Status != PredictionStatus.Running)
+            .Where(r => r.FinishedAt != null && r.Status != PredictionStatus.Failed && r.Status != PredictionStatus.Running && r.Status != PredictionStatus.Skipped)
             .OrderByDescending(r => r.Id)
             .FirstOrDefaultAsync(ct);
 
