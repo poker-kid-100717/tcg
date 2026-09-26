@@ -80,6 +80,8 @@ builder.Services.AddScoped<PredictionService>();
 var billingOptions = builder.Configuration.GetSection(BillingOptions.SectionName).Get<BillingOptions>() ?? new();
 builder.Services.AddSingleton(billingOptions);
 builder.Services.AddSingleton(new ProductStore(normalizedConnectionString));
+builder.Services.AddSingleton(new MasterSetStore(normalizedConnectionString));
+builder.Services.AddScoped<MasterSetService>();
 builder.Services.AddScoped<SessionService>();
 builder.Services.AddScoped<EntitlementService>();
 var scrydexOptions = builder.Configuration.GetSection(ScrydexOptions.SectionName).Get<ScrydexOptions>() ?? new();
