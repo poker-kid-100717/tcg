@@ -75,7 +75,11 @@ describe("worker routing", () => {
     const { env, apiRequests, inventoryRequests } = createEnv({ hasStoreFinder: false });
 
     const response = await worker.fetch(
-      new Request("https://tcg.example.com/api/inventory/nearby?lat=35.1&lng=-106.6&radius=25"),
+      new Request("https://tcg.example.com/api/inventory/nearby", {
+        method: "POST",
+        body: JSON.stringify({ latitude: 35.1, longitude: -106.6, radiusMiles: 25 }),
+        headers: { "content-type": "application/json" },
+      }),
       env,
     );
 
@@ -89,7 +93,11 @@ describe("worker routing", () => {
     const { env, apiRequests, inventoryRequests } = createEnv({ hasStoreFinder: true });
 
     const response = await worker.fetch(
-      new Request("https://tcg.example.com/api/inventory/nearby?lat=35.1&lng=-106.6&radius=25"),
+      new Request("https://tcg.example.com/api/inventory/nearby", {
+        method: "POST",
+        body: JSON.stringify({ latitude: 35.1, longitude: -106.6, radiusMiles: 25 }),
+        headers: { "content-type": "application/json" },
+      }),
       env,
     );
 
