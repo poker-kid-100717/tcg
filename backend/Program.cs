@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
@@ -5,6 +6,7 @@ using Microsoft.Extensions.Http.Resilience;
 using PokemonTCG.API.Data;
 using PokemonTCG.API.Pricing;
 using PokemonTCG.API.Pricing.Predictions;
+using PokemonTCG.API.Pricing.Tcgplayer;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -30,7 +32,7 @@ builder.Services.AddHealthChecks()
 // container is only reachable through that Worker, so trust those headers.
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
-    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto | ForwardedHeaders.XForwardedHost;
     options.KnownIPNetworks.Clear();
     options.KnownProxies.Clear();
 });
@@ -66,8 +68,26 @@ builder.Services.AddHttpClient<PokemonTcgClient>(client =>
     });
 builder.Services.AddHybridCache();
 
+// TCGplayer Developer API. Optional: with no keys configured the client is
+// registered but unused, and prices keep coming from the Pokémon TCG API
+// (which republishes TCGplayer's market prices daily).
+builder.Services.AddTcgplayerClient(builder.Configuration)
+    .AddStandardResilienceHandler(options =>
+    {
+        options.AttemptTimeout.Timeout = TimeSpan.FromSeconds(30);
+        options.CircuitBreaker.SamplingDuration = TimeSpan.FromMinutes(1);
+    });
+
+// The container sleeps and restarts, so the keys that protect session and
+// sign-in cookies live in Postgres rather than on its disk.
+builder.Services.AddDataProtection()
+    .SetApplicationName("tcg")
+    .PersistKeysToDbContext<AppDbContext>();
+
 builder.Services.AddSingleton(builder.Configuration.GetSection(SnapshotOptions.SectionName).Get<SnapshotOptions>() ?? new());
+builder.Services.AddScoped<TcgplayerPriceSync>();
 builder.Services.AddScoped<PriceSnapshotService>();
+builder.Services.AddScoped<CatalogReader>();
 builder.Services.AddScoped<PriceGuideService>();
 builder.Services.AddSingleton(builder.Configuration.GetSection(PredictionOptions.SectionName).Get<PredictionOptions>() ?? new());
 builder.Services.AddScoped<PredictionService>();

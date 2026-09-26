@@ -36,7 +36,7 @@ describe("worker routing", () => {
     expect(env.ASSETS.fetch).not.toHaveBeenCalled();
   });
 
-  it("forwards the original scheme and client IP", async () => {
+  it("forwards the original scheme, host and client IP", async () => {
     const { env, apiRequests } = createEnv();
 
     await worker.fetch(
@@ -46,6 +46,7 @@ describe("worker routing", () => {
 
     expect(apiRequests[0].headers.get("X-Forwarded-Proto")).toBe("https");
     expect(apiRequests[0].headers.get("X-Forwarded-For")).toBe("203.0.113.7");
+    expect(apiRequests[0].headers.get("X-Forwarded-Host")).toBe("tcg.example.com");
   });
 
   it.each(["/", "/sets", "/cards/xy1-1", "/apiary", "/internal/snapshots"])("serves %s from static assets", async (path) => {

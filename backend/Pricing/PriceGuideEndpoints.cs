@@ -40,7 +40,7 @@ public static class PriceGuideEndpoints
         api.MapGet("/market/sleepers", (int? limit, decimal? minPrice, PriceGuideService guide, CancellationToken ct) =>
             guide.GetSleepersAsync(Math.Clamp(limit ?? 12, 1, 50), minPrice ?? 2m, 0.10m, ct));
 
-        api.MapGet("/market/status", async (AppDbContext db, CancellationToken ct) =>
+        api.MapGet("/market/status", async (AppDbContext db, Tcgplayer.TcgplayerPriceSync tcgplayer, CancellationToken ct) =>
         {
             var lastRun = await db.SnapshotRuns.AsNoTracking()
                 .Where(r => r.Status == SnapshotStatus.Succeeded)
@@ -48,7 +48,11 @@ public static class PriceGuideEndpoints
                 .Select(r => new { r.FinishedAt, r.CardsSeen, r.PricesWritten })
                 .FirstOrDefaultAsync(ct);
             var days = await db.PriceSnapshots.Select(s => s.Date).Distinct().CountAsync(ct);
-            return new { LastSnapshotAt = lastRun?.FinishedAt, lastRun?.CardsSeen, lastRun?.PricesWritten, DaysOfHistory = days };
+            return new
+            {
+                LastSnapshotAt = lastRun?.FinishedAt, lastRun?.CardsSeen, lastRun?.PricesWritten, DaysOfHistory = days,
+                tcgplayer.PriceSource, TcgplayerApi = tcgplayer.IsConfigured,
+            };
         });
 
         // Not under /api: the Worker only forwards /api and /health from the

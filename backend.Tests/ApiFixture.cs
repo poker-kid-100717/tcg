@@ -34,6 +34,7 @@ namespace PokemonTcgMarketplace.Backend.Tests
                 builder.ConfigureTestServices(services =>
                 {
                     services.AddHttpClient<PokemonTcgClient>().ConfigurePrimaryHttpMessageHandler(() => Upstream);
+                    ConfigureServices(services);
                     services.AddSingleton<TimeProvider>(Clock);
                 });
             });
@@ -50,6 +51,9 @@ namespace PokemonTcgMarketplace.Backend.Tests
 
         /// <summary>Extra configuration for fixtures that need it.</summary>
         protected virtual IEnumerable<(string Key, string Value)> Settings => [];
+
+        /// <summary>Extra service overrides for fixtures that need them.</summary>
+        protected virtual void ConfigureServices(IServiceCollection services) { }
 
         public HttpClient CreateClient() => Factory.CreateClient();
 
@@ -75,6 +79,31 @@ namespace PokemonTcgMarketplace.Backend.Tests
             ("Predictions:Trees", "100"),
             ("Predictions:MinExamplesPerLeaf", "5"),
         ];
+    }
+
+    /// <summary>Its own database, with TCGplayer Developer API keys set and TCGplayer replaced by <see cref="Tcgplayer.FakeTcgplayerApi"/>.</summary>
+    public sealed class TcgplayerFixture : ApiFixture
+    {
+        public Tcgplayer.FakeTcgplayerApi TcgplayerApi { get; } = new();
+
+        protected override IEnumerable<(string Key, string Value)> Settings =>
+        [
+            ("Tcgplayer:PublicKey", Tcgplayer.FakeTcgplayerApi.PublicKey),
+            ("Tcgplayer:PrivateKey", Tcgplayer.FakeTcgplayerApi.PrivateKey),
+            ("Tcgplayer:BaseUrl", "https://tcgplayer.test"),
+        ];
+
+        protected override void ConfigureServices(IServiceCollection services)
+        {
+            services.AddHttpClient(PokemonTCG.API.Pricing.Tcgplayer.TcgplayerTokenProvider.HttpClientName).ConfigurePrimaryHttpMessageHandler(() => TcgplayerApi);
+            services.AddHttpClient<PokemonTCG.API.Pricing.Tcgplayer.TcgplayerClient>().ConfigurePrimaryHttpMessageHandler(() => TcgplayerApi);
+        }
+    }
+
+    [CollectionDefinition(Name)]
+    public class TcgplayerCollection : ICollectionFixture<TcgplayerFixture>
+    {
+        public const string Name = "tcgplayer";
     }
 
     [CollectionDefinition(Name)]

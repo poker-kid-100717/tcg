@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.DataProtection.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 
 namespace PokemonTCG.API.Data
@@ -13,6 +14,12 @@ namespace PokemonTCG.API.Data
         public string? Rarity { get; set; }
         public string? ImageSmall { get; set; }
         public string? TcgplayerUrl { get; set; }
+        public string? ImageLarge { get; set; }
+        public string? Hp { get; set; }
+        public string[] Types { get; set; } = [];
+        public string? FlavorText { get; set; }
+        /// <summary>The matching TCGplayer product, once the TCGplayer catalog has been matched.</summary>
+        public int? TcgplayerProductId { get; set; }
 
         // Attributes the price model learns from (see Pricing/Predictions).
         public string? Supertype { get; set; }
@@ -38,6 +45,8 @@ namespace PokemonTCG.API.Data
         public decimal? Low { get; set; }
         public decimal? Mid { get; set; }
         public decimal? High { get; set; }
+        /// <summary>Which provider the day's reference price came from.</summary>
+        public MarketProvider Provider { get; set; } = MarketProvider.PokemonTcg;
     }
 
     public enum SnapshotStatus
@@ -125,9 +134,18 @@ namespace PokemonTCG.API.Data
         public string Reasons { get; set; } = "[]";
     }
 
-    public class AppDbContext : DbContext
+    /// <summary>
+    /// The catalog and price history, predictions, market signals and comps, and TCG Signal accounts (users,
+    /// subscriptions, watchlists, alerts). Each area configures its tables in its own partial file. Data Protection keeps
+    /// its keys here so sign-ins survive container restarts.
+    /// </summary>
+    public partial class AppDbContext : DbContext, IDataProtectionKeyContext
     {
         public AppDbContext(DbContextOptions<AppDbContext> options) : base(options) { }
+
+        public DbSet<CardSet> Sets => Set<CardSet>();
+        public DbSet<LatestPrice> LatestPrices => Set<LatestPrice>();
+        public DbSet<DataProtectionKey> DataProtectionKeys => Set<DataProtectionKey>();
 
         public DbSet<Card> Cards => Set<Card>();
         public DbSet<PriceSnapshot> PriceSnapshots => Set<PriceSnapshot>();
@@ -137,6 +155,9 @@ namespace PokemonTCG.API.Data
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
+            modelBuilder.Entity<DataProtectionKey>().ToTable("data_protection_keys");
+            ConfigureCatalog(modelBuilder);
+            ConfigureMarket(modelBuilder);
             modelBuilder.Entity<Card>(card =>
             {
                 card.ToTable("cards");
@@ -155,6 +176,11 @@ namespace PokemonTCG.API.Data
                 card.Property(c => c.SetSeries).HasColumnName("set_series").HasMaxLength(100);
                 card.Property(c => c.SetReleased).HasColumnName("set_released");
                 card.Property(c => c.SetPrintedTotal).HasColumnName("set_printed_total");
+                card.Property(c => c.ImageLarge).HasColumnName("image_large").HasMaxLength(500);
+                card.Property(c => c.Hp).HasColumnName("hp").HasMaxLength(10);
+                card.Property(c => c.Types).HasColumnName("types");
+                card.Property(c => c.FlavorText).HasColumnName("flavor_text").HasMaxLength(1000);
+                card.Property(c => c.TcgplayerProductId).HasColumnName("tcgplayer_product_id");
                 card.HasIndex(c => c.SetId);
             });
 
@@ -169,6 +195,7 @@ namespace PokemonTCG.API.Data
                 snapshot.Property(s => s.Low).HasColumnName("low").HasPrecision(12, 2);
                 snapshot.Property(s => s.Mid).HasColumnName("mid").HasPrecision(12, 2);
                 snapshot.Property(s => s.High).HasColumnName("high").HasPrecision(12, 2);
+                snapshot.Property(s => s.Provider).HasColumnName("provider").HasConversion<string>().HasMaxLength(30).HasDefaultValue(MarketProvider.PokemonTcg);
                 // Movers and retention both filter by day across all cards.
                 snapshot.HasIndex(s => s.Date);
                 snapshot.HasOne<Card>().WithMany().HasForeignKey(s => s.CardId).OnDelete(DeleteBehavior.Cascade);
