@@ -12,6 +12,9 @@ export interface Env {
   TCG_STRIPE_WEBHOOK_SECRET?: string;
   TCG_STRIPE_PRO_MONTHLY_PRICE_ID?: string;
   TCG_STRIPE_PRO_ANNUAL_PRICE_ID?: string;
+  /** Forward-looking replacement/enrichment provider for the deprecated Pokémon TCG API. */
+  TCG_SCRYDEX_API_KEY?: string;
+  TCG_SCRYDEX_TEAM_ID?: string;
 }
 
 /**
@@ -36,6 +39,8 @@ export class TcgApi extends Container<Env> {
       ...(env.TCG_STRIPE_WEBHOOK_SECRET ? { Billing__StripeWebhookSecret: env.TCG_STRIPE_WEBHOOK_SECRET } : {}),
       ...(env.TCG_STRIPE_PRO_MONTHLY_PRICE_ID ? { Billing__ProMonthlyPriceId: env.TCG_STRIPE_PRO_MONTHLY_PRICE_ID } : {}),
       ...(env.TCG_STRIPE_PRO_ANNUAL_PRICE_ID ? { Billing__ProAnnualPriceId: env.TCG_STRIPE_PRO_ANNUAL_PRICE_ID } : {}),
+      ...(env.TCG_SCRYDEX_API_KEY ? { Scrydex__ApiKey: env.TCG_SCRYDEX_API_KEY } : {}),
+      ...(env.TCG_SCRYDEX_TEAM_ID ? { Scrydex__TeamId: env.TCG_SCRYDEX_TEAM_ID } : {}),
     };
   }
 }
