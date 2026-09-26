@@ -55,6 +55,14 @@ public record DashboardView(
     IReadOnlyList<AlertView> Alerts,
     int UnreadAlerts);
 
+public record SoldCompView(
+    string Id,
+    string Source,
+    string? Title,
+    decimal Price,
+    DateOnly SoldAt,
+    string? Url);
+
 public record MarketIntelligenceView(
     string CardId,
     string Variant,
@@ -75,6 +83,11 @@ public record MarketIntelligenceView(
     bool IsStale,
     string Liquidity,
     string LiquidityReason,
+    int? SoldComps30Days,
+    decimal? MedianSold30Days,
+    decimal? LastSoldPrice,
+    DateOnly? LastSoldAt,
+    IReadOnlyList<SoldCompView> RecentSoldComps,
     IReadOnlyList<string> Reasons);
 
 public record CheckoutRequest(string Plan);
