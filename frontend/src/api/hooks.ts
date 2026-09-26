@@ -13,7 +13,12 @@ export const useSet = (id: string) =>
   useQuery({ queryKey: ['set', id], queryFn: ({ signal }) => api.set(id, signal), staleTime: minutes(30) });
 
 export const useCard = (id: string) =>
-  useQuery({ queryKey: ['card', id], queryFn: ({ signal }) => api.card(id, signal), staleTime: minutes(30) });
+  useQuery({
+    queryKey: ['card', id],
+    queryFn: ({ signal }) => api.card(id, signal),
+    staleTime: minutes(30),
+    enabled: id.length > 0,
+  });
 
 export const useSearch = (q: string, page: number) =>
   useQuery({
