@@ -64,8 +64,8 @@ export function MarketIntelligencePanel({ cardId, variant }: { cardId: string; v
         <Metric label="30-day change" value={pct(data.change30Percent)} />
         <Metric label="Volatility" value={pct(data.volatilityPercent)} />
         <Metric label="Current low" value={formatPrice(data.low)} />
-        <Metric label="Current high" value={formatPrice(data.high)} />
-        <Metric label="Listing spread" value={pct(data.spreadPercent)} />
+        <Metric label="Median sold · 30d" value={formatPrice(data.medianSold30Days)} />
+        <Metric label="Sold comps · 30d" value={data.soldComps30Days === null ? '—' : String(data.soldComps30Days)} />
         <Metric label="Daily observations" value={String(data.observationDays)} />
       </dl>
 
@@ -82,6 +82,30 @@ export function MarketIntelligencePanel({ cardId, variant }: { cardId: string; v
           </ul>
         </div>
       </div>
+
+      {data.recentSoldComps.length > 0 && (
+        <div className="overflow-hidden rounded-lg border border-slate-200">
+          <div className="border-b border-slate-200 bg-slate-50 px-4 py-3">
+            <p className="text-sm font-semibold text-slate-900">Recent sold comps</p>
+            <p className="text-xs text-slate-500">Raw sales returned by the configured market-data provider.</p>
+          </div>
+          <ul className="divide-y divide-slate-100">
+            {data.recentSoldComps.map((comp) => (
+              <li key={comp.id} className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 text-sm">
+                <div className="min-w-0">
+                  <p className="font-semibold text-slate-900">{formatPrice(comp.price)} · {comp.source}</p>
+                  <p className="max-w-2xl truncate text-xs text-slate-500">{comp.title ?? 'Sold listing'} · {formatDate(comp.soldAt)}</p>
+                </div>
+                {comp.url && (
+                  <a href={comp.url} target="_blank" rel="noreferrer" className="text-xs font-semibold text-pokemon-pokeblue hover:underline">
+                    View sale ↗
+                  </a>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <p className="text-xs text-slate-500">
         As of {formatDate(data.asOf)}. Confidence measures the quality and consistency of the available pricing observations;
