@@ -1,221 +1,360 @@
-# Pokémon TCG Price Guide
+# TCG Signal
 
 [![CI](https://github.com/poker-kid-100717/tcg/actions/workflows/ci.yml/badge.svg)](https://github.com/poker-kid-100717/tcg/actions/workflows/ci.yml)
 
-**Live: [tcg-portfolio-sample.app](https://tcg-portfolio-sample.app)**
+**Live:** https://tcg-portfolio-sample.app
 
-A price guide and set guide for the Pokémon Trading Card Game. It shows the TCGplayer market price of every card in
-every set, records prices daily to build a price history and a list of the week's biggest movers, and links each card
-to its TCGplayer listing with a **Shop now** button. It doesn't sell anything itself.
+TCG Signal is a Pokémon card market-intelligence MVP. It starts with the same card/set lookup people expect from a price guide, then answers the harder questions:
 
-- **Sets:** every set, grouped by series. Each set page lists every card with its market price, the set's total
-  market value and most valuable card, with sorting (collector number, price, name), a rarity filter and a
-  find-in-set box. Sort and rarity are kept in the URL, so a filtered view can be shared.
-- **Cards:** the TCGplayer market, low, mid and high price for each printing (holofoil, reverse holo, first
-  edition…), a price-history chart built from the daily snapshots, the card's details, and **Shop now on
-  TCGplayer**.
-- **Market:** the biggest gains and drops over 24 hours, 7 days or 30 days, the most valuable cards right now, and two
-  signals:
-  - **Trending down:** cards in a steady decline over 30 days (not one bad day), each with a sparkline.
-  - **Sleepers:** quiet cards with nothing listed near what they sell for. The cheapest TCGplayer listing is 10%+ above
-    the market price while the market price has barely moved, which often comes before the price catches up.
-- **Outlook:** a machine-learning forecast of every card's price 30 days out, with a likely range and the factors
-  behind it, plus how well the model has done: its error against "no change" on held-out weeks, what it relies on,
-  and a track record of past predictions checked against real prices. Each card page shows its own outlook.
-- **Search:** by card name, newest sets first.
+- What is the current market reference?
+- How trustworthy is that number?
+- Is the market moving or noisy?
+- Are there recent sold comps?
+- How liquid does the observed market look?
+- What happens to a deal after tax, shipping and selling costs?
+- Did a watched printing cross a price or movement threshold?
+- Does the forecasting model actually beat simply predicting “no change”?
+
+The application never invents transaction counts or sale prices. When transaction-level data is unavailable, liquidity is shown as **Unknown** rather than estimated from unrelated fields.
+
+## MVP
+
+### Free / public foundation
+
+- Pokémon set browser and card search.
+- Current raw TCGplayer pricing by printing.
+- Daily local price snapshots in Postgres.
+- 24-hour, 7-day and 30-day market movers.
+- Most-valuable cards.
+- Sustained downtrend detection using regression.
+- Sleeper / supply-gap signals.
+- Card-level price history.
+- Direct links to TCGplayer.
+
+### TCG Signal product layer
+
+- **Market Intelligence**
+  - 0–100 confidence score.
+  - explicit confidence band.
+  - data freshness.
+  - 7-day / 30-day change.
+  - observed volatility.
+  - provider provenance.
+  - liquidity label and explanation.
+  - recent sold comps when Scrydex is configured.
+  - “why this confidence?” explanation generated from deterministic metrics.
+- **Watchlist**
+  - exact card printing.
+  - below-price target.
+  - above-price target.
+  - percentage-move target.
+  - baseline captured when a card is watched.
+- **In-app alerts**
+  - evaluated after each successful daily snapshot.
+  - crossing logic prevents repeated alerts while a price remains on the same side of a threshold.
+  - idempotent event keys prevent duplicates.
+- **Personal dashboard**
+  - watched-printing count.
+  - tracked market total.
+  - unread alerts.
+  - biggest watchlist movers.
+- **Deal Analyzer**
+  - asking price.
+  - acquisition shipping.
+  - tax / other cost.
+  - expected sale price.
+  - selling-cost preset or custom percentage.
+  - outbound shipping.
+  - estimated proceeds.
+  - estimated net after entered costs.
+  - break-even sale price.
+- **Pro / billing shell**
+  - Stripe Checkout.
+  - Stripe Customer Portal.
+  - verified Stripe webhook handling.
+  - backend subscription entitlements.
+  - if Stripe is not configured, the site intentionally runs in **Founding Preview** mode with Pro features unlocked so the MVP remains fully testable.
+
+### 30-day Outlook
+
+The existing ML.NET forecasting system is retained, but it is not the MVP's core value proposition.
+
+- FastTree gradient-boosted regression.
+- 27 engineered market/card features.
+- time-separated validation.
+- model is published only when it beats a no-change baseline.
+- per-card prediction range and deterministic feature-contribution explanations.
+- realized checkpoints are scored later against actual prices.
+- cold start requires roughly 74 days of usable history at the default 30-day horizon.
+
+## Data-provider strategy
+
+### 1. Pokémon TCG API — compatibility/catalog source
+
+The existing application still uses the Pokémon TCG API for:
+
+- sets.
+- cards.
+- images.
+- TCGplayer URL and current TCGplayer price fields.
+- daily snapshot ingestion.
+
+This integration is intentionally isolated behind `PokemonTcgClient`.
+
+The provider has announced deprecation, so new product work should not increase coupling to it.
+
+### 2. Scrydex — forward-looking market-intelligence provider
+
+Scrydex is the preferred enrichment/migration target.
+
+When these two secrets are configured:
+
+- `SCRYDEX_API_KEY`
+- `SCRYDEX_TEAM_ID`
+
+Market Intelligence can use:
+
+- raw Near Mint price history.
+- provider market price.
+- recent historical sold listings.
+- listing source.
+- sold date.
+- sold price.
+- original listing URL when supplied.
+
+The app currently requests only the card/printing needed for a Pro intelligence view rather than pulling the entire catalog repeatedly. The local daily Postgres snapshot remains valuable for cost control, trend calculations and model training.
+
+Scrydex is optional. If it is unavailable or not configured, the API falls back to local TCGplayer snapshots and clearly labels sold-comp/liquidity information as unavailable.
+
+Relevant docs:
+
+- https://scrydex.com/docs
+- https://scrydex.com/docs/pokemon/price-history
+- https://scrydex.com/docs/pokemon/listings
+- https://scrydex.com/docs/getting-started/prices
+
+## Architecture
+
+```text
+Browser
+  |
+  v
+Cloudflare Worker
+  |-- static React/Vite assets
+  |-- /api/* + /health -> Cloudflare Container
+  |
+  v
+ASP.NET Core 10 API
+  |-- PokemonTcgClient --------> Pokémon TCG API (catalog / compatibility)
+  |-- ScrydexClient -----------> Scrydex (optional premium enrichment)
+  |-- StripeBillingService ----> Stripe (optional billing)
+  |
+  v
+Neon PostgreSQL
+  |-- cards
+  |-- price_snapshots
+  |-- snapshot_runs
+  |-- prediction_runs
+  |-- price_predictions
+  |-- app_users
+  |-- subscriptions
+  |-- watchlist_items
+  `-- alert_events
+
+11:15 UTC Cloudflare Cron -> POST /internal/snapshots
+                              |
+                              `-> evaluate watchlist alerts after successful snapshot
+
+11:45 UTC Cloudflare Cron -> POST /internal/predictions
+```
+
+The Worker does **not** publicly forward `/internal/*`.
 
 ## Stack
 
 | Layer | Technology |
 |---|---|
-| Frontend | React 19, TypeScript, Vite, TanStack Query, React Router 7, Tailwind CSS, Chart.js |
-| API | ASP.NET Core 10 minimal APIs, EF Core 10 on PostgreSQL (Npgsql), HybridCache, `Microsoft.Extensions.Http.Resilience` |
-| ML | ML.NET 5 FastTree (gradient-boosted regression trees) with per-prediction feature contributions |
-| Data | [Pokémon TCG API](https://docs.pokemontcg.io) for cards, sets and TCGplayer prices; Postgres (Neon) for the daily price snapshots |
-| Hosting | Cloudflare Worker (static site, routing, Cron Trigger) and a Cloudflare Container running the API |
-| Tests | xUnit + Testcontainers (real Postgres), Vitest + Testing Library, Worker routing tests |
+| Frontend | React 19, TypeScript, Vite, TanStack Query, React Router, Tailwind CSS, Chart.js |
+| API | ASP.NET Core 10 minimal APIs |
+| Data | PostgreSQL / Neon, EF Core 10, Npgsql |
+| Compatibility provider | Pokémon TCG API |
+| Premium provider | Scrydex (optional) |
+| Billing | Stripe Checkout + Customer Portal + signed webhooks (optional) |
+| ML | ML.NET 5 FastTree |
+| Edge / hosting | Cloudflare Worker + Cloudflare Container |
+| CI/CD | GitHub Actions |
+| Tests | xUnit + Testcontainers, Vitest, Worker tests |
 
-## Architecture
+## Identity and entitlements
 
-```
-Browser ──► Cloudflare Worker (worker/index.ts)
-              ├── /*                 → React build (static assets, SPA fallback)
-              └── /api/*, /health    → Cloudflare Container: ASP.NET Core 10 API ──┬──► Pokémon TCG API (cards, sets, prices)
-                                                                                    └──► Neon Postgres (price snapshots)
-Cron Trigger (11:15 UTC) ──► Worker.scheduled ──► POST /internal/snapshots on the container
-Cron Trigger (11:45 UTC) ──► Worker.scheduled ──► POST /internal/predictions (retrain, validate, predict, score past runs)
-```
+The MVP does not ask for a password.
 
-```
-backend/
-  Pricing/
-    PokemonTcgClient.cs      Typed HttpClient for the Pokémon TCG API: paging, query building and escaping
-    PriceGuideService.cs     Read side: sets, set detail, card history, search, movers, top cards, down-trend, sleepers
-    PriceSnapshotService.cs  Daily job: records every card's TCGplayer prices with bulk upserts
-    PriceGuideEndpoints.cs   Minimal API endpoints, plus the 502 handler for upstream outages
-    Predictions/
-      PriceFeatures.cs       The 27 model inputs, group premiums, and a plain-English line for each
-      PriceModel.cs          ML.NET FastTree training, prediction and feature contributions
-      PredictionService.cs   Daily job: feature query, time-split validation, publish rule, track record
-      PredictionEndpoints.cs Outlook, per-card and model-summary endpoints
-  Data/                      EF Core model and migrations, startup migration with retry, readiness middleware
-frontend/src/
-  api/                       Typed API client and TanStack Query hooks
-  pages/                     Home, Sets, Set, Card, Search, Market, Outlook, How it works
-  components/                Layout, card tile, Shop link, price history chart, movers table, sparkline, market signals
-worker/index.ts              Routing, container binding, daily Cron Trigger
-```
+A first-party secure device session is created with:
 
-### API
+- a random 256-bit token.
+- only the SHA-256 token hash stored in Postgres.
+- HttpOnly cookie.
+- Secure cookie in production.
+- SameSite=Lax.
 
-| Method | Route | Returns |
+This is intentionally an MVP identity model. It is enough for persisted watchlists, alerts and a billing customer mapping without shipping homemade password authentication.
+
+For a multi-device consumer launch, replace this with a production OIDC provider and migrate the device profile into the authenticated account.
+
+### Pro behavior
+
+If all Stripe configuration values are present, Pro access is derived from backend subscription state.
+
+Recognized active states:
+
+- `active`
+- `trialing`
+
+If Stripe is not configured, every device receives Pro access in **Founding Preview** mode.
+
+## API highlights
+
+| Method | Route | Purpose |
 |---|---|---|
-| `GET` | `/api/sets` | Every set, newest first |
-| `GET` | `/api/sets/{id}` | The set, its stats (total market value, most valuable card) and every card with its price |
-| `GET` | `/api/cards/{id}` | Card details, prices by printing, TCGplayer link and up to a year of daily price history |
-| `GET` | `/api/cards?q=&page=` | Cards whose name starts with `q` |
-| `GET` | `/api/market/movers?days=7` | Biggest gains and drops between the latest snapshot and the one `days` earlier |
-| `GET` | `/api/market/top` | Most valuable cards in the latest snapshot |
-| `GET` | `/api/market/downtrend?days=30` | Cards falling steadily over the window, with their daily prices |
-| `GET` | `/api/market/sleepers` | Cards whose cheapest listing is well above their market price while the price stays flat |
-| `GET` | `/api/predictions?direction=up` | Cards the model predicts will rise (or `down`), with range and reasons |
-| `GET` | `/api/cards/{id}/predictions` | The card's prediction for each printing |
-| `GET` | `/api/predictions/model` | The current model: status, held-out error vs "no change", feature importance, track record |
-| `GET` | `/api/market/status` | When prices were last recorded and how many days of history exist |
-| `GET` | `/health`, `/health/live` | Readiness (database and migrations) and liveness |
-| `POST` | `/internal/snapshots` | Runs the price snapshot. Called by the Cron Trigger; the Worker never forwards `/internal` from the internet |
-| `POST` | `/internal/predictions` | Retrains the model and refreshes predictions. Called by the second Cron Trigger |
+| GET | `/api/sets` | Set browser |
+| GET | `/api/sets/{id}` | Set detail |
+| GET | `/api/cards/{id}` | Card + current pricing/history |
+| GET | `/api/cards?q=` | Card search |
+| GET | `/api/cards/{id}/intelligence?variant=` | Market Confidence + liquidity + sold comps |
+| GET | `/api/market/movers` | Market movers |
+| GET | `/api/market/downtrend` | Sustained decline signal |
+| GET | `/api/market/sleepers` | Listing-gap signal |
+| GET | `/api/predictions` | Published model predictions |
+| GET | `/api/predictions/model` | Model validation / track record |
+| POST | `/api/session` | Get/create device profile |
+| GET/POST | `/api/watchlist` | Watchlist |
+| PUT/DELETE | `/api/watchlist/{id}` | Watch threshold management |
+| GET | `/api/alerts` | In-app alert feed |
+| GET | `/api/dashboard` | Personalized dashboard |
+| POST | `/api/billing/checkout` | Stripe Checkout |
+| POST | `/api/billing/portal` | Stripe Customer Portal |
+| POST | `/api/billing/webhook` | Signed Stripe events |
+| GET | `/health` | Database/migration readiness |
+| GET | `/health/live` | Process liveness |
 
-### Design decisions
+## Local development
 
-- **Link out to TCGplayer instead of a cart and checkout.** TCGplayer already has the inventory, sellers and
-  checkout. Each card's Shop now button opens its TCGplayer listing (the Pokémon TCG API's
-  `prices.pokemontcg.io/tcgplayer/{id}` link, which redirects to the product page).
-- **Card data goes through the API.** The Pokémon TCG API key stays on the server; HybridCache keeps popular sets
-  and cards from being refetched for every visitor; the resilience handler retries transient failures with
-  timeouts sized for 250-card pages; and an upstream outage returns a clear `502` instead of a `500`.
-- **Daily snapshots on a Cron Trigger.** The container sleeps after 10 minutes idle, so an in-process timer
-  wouldn't fire reliably. The Worker's `scheduled` handler wakes the container once a day and calls
-  `/internal/snapshots`. A second trigger while a run is in progress gets `409`.
-- **Bulk upserts with Postgres `unnest`, in one transaction.** A run pages through every card, 250 at a time, and
-  writes each page with one `INSERT … SELECT FROM unnest(…) ON CONFLICT DO UPDATE` per table, all inside one
-  transaction, so a failed run leaves nothing half-written. The whole day is a few dozen
-  statements, and rerunning a day overwrites that day's rows instead of duplicating them.
-- **Only meaningful prices are kept.** Printings under $0.50 (`Snapshots:MinMarketPrice`) aren't recorded, and
-  snapshots older than 400 days are deleted after each run, which keeps the table inside a free Neon database.
-  Movers ignore prices under $2, so a few cents on a common doesn't top the list, and each card appears once
-  (its biggest move).
-- **Trends are fitted in Postgres, not eyeballed from two dates.** Trending down runs a least-squares fit over each
-  printing's daily prices with `regr_slope` and `regr_r2` in one SQL query. A card qualifies only if the line slopes
-  down, fits well (r² ≥ 0.6, so a single spike or dip doesn't count), has at least 5 days of prices and dropped 10% or
-  more. Sleepers compare the cheapest listing (TCGplayer *low*) with the market price (recent sales), ignore gaps over
-  3× as likely bad data, and require the market price to be within 15% of 30 days ago. The page states both rules and
-  that they're signals, not financial advice.
-- **Predictions from a trained, tested model, not a guess.**
-  - **Target:** the log of each printing's price ratio 30 days ahead, predicted by gradient-boosted regression
-    trees (ML.NET FastTree). Trees handle features on mixed scales and their interactions (a 1st Edition holo from
-    1999 behaves nothing like last month's reverse holo), and they can say how much each feature moved one prediction.
-  - **Features (27):** price level; 7, 30 and 90-day change; volatility; the 30-day trend and how steady it is; the
-    cheapest, median and highest listing against the market price; set age, size and era; secret rare; rank and
-    share of value in its set; rarity, Pokémon and artist premiums (how their cards sell against the typical card
-    that day, shrunk toward zero for small groups); how many cards feature the Pokémon; Trainer, Energy and rule-box
-    flags; and the printing. Pokémon popularity is measured from prices, so it updates itself.
-  - **Validation without leakage:** samples are taken weekly. A sample's outcome is its first price in the 5 days
-    from the horizon date. A date counts as labelled only once its whole outcome window has passed. The most recent 20% of labelled dates are held out, and training uses only
-    dates whose whole outcome window closed before that period started. Features use only what was known on the
-    sample date: a Pokémon's printings are counted from set release dates up to then, and validation error is
-    measured on real (unclipped) returns.
-  - **Only complete days:** a snapshot run is one database transaction, so a run that fails part-way records
-    nothing, and the prediction run is skipped while a snapshot is running or after one failed; the previous
-    predictions stay up. Rarity, Pokémon and artist premiums are computed in SQL over every priced printing that
-    day, before any sampling. Each printing is predicted from its most recent price in the last week.
-  - **Bounded memory:** rows are capped per sample date inside the SQL query (a stable pseudo-random subset, taken
-    after set ranks are computed on the full day), so the container never loads more than
-    `Predictions:MaxTrainingRows` labelled rows. The latest day is never capped.
-  - **Publish rule:** the model has to beat predicting "no change" on the held-out weeks by at least 2%, or its
-    predictions are withheld and the page says why. Each prediction's range comes from the 10th and 90th
-    percentile of held-out errors.
-  - **Track record:** one run a week keeps its predictions (with its own horizon, so rows stay correct if the
-    horizon setting changes). Once their 30 days plus the 5-day outcome window are
-    up, the next run scores them against actual prices and drops the rows. Other runs' rows are dropped once a newer run publishes, which keeps
-    the table small.
-  - **Cold start:** training and testing a 30-day model needs about 74 days of prices; until then the Outlook page
-    says how many days it has.
-- **Readiness that tells the truth.** `/health` fails until migrations have applied, requests wait for database
-  initialization after a cold start, and startup retries the migration with backoff if Neon is still waking.
+Requires:
 
-## Running locally
-
-Requires the .NET 10 SDK, Node 22.12+ and Docker.
+- .NET 10 SDK.
+- Node 22.12+.
+- Docker.
 
 ```bash
-docker compose up -d                              # Postgres 17 on localhost:5432
-dotnet run --project backend                      # API on http://localhost:5259 (Swagger at /swagger)
-curl -X POST http://localhost:5259/internal/snapshots   # record today's prices (takes a minute or two)
+docker compose up -d
+dotnet run --project backend
 
-cd frontend && npm ci && npm run dev              # http://localhost:3000, proxies /api to the API
+cd frontend
+npm ci
+npm run dev
 ```
 
-Optionally set `PokemonTcgApi__ApiKey` (free from [dev.pokemontcg.io](https://dev.pokemontcg.io)) for a higher
-rate limit. Price history and movers need at least two snapshots on different days.
+Record a local snapshot:
 
-## Deployment
+```bash
+curl -X POST http://localhost:5259/internal/snapshots
+```
 
-On push to `main`, `.github/workflows/deploy-cloudflare.yml` builds the frontend, runs `wrangler deploy` (which
-builds and pushes the API container image), uploads the Worker secrets, and smoke-tests the production domain:
-`/health`, a page, `/api/sets` and `/api/market/status`. `ci.yml` runs every test suite and the EF migration
-drift check on pull requests and pushes.
+### Optional local Scrydex configuration
 
-| GitHub secret | Value |
+Use .NET configuration/environment variables:
+
+```text
+Scrydex__ApiKey
+Scrydex__TeamId
+```
+
+### Optional local Stripe configuration
+
+```text
+Billing__StripeSecretKey
+Billing__StripeWebhookSecret
+Billing__ProMonthlyPriceId
+Billing__ProAnnualPriceId
+Billing__SiteUrl
+```
+
+If those values are absent, the UI operates in Founding Preview mode.
+
+## GitHub / Cloudflare deployment
+
+Required GitHub secrets:
+
+| Secret | Purpose |
 |---|---|
-| `CLOUDFLARE_API_TOKEN` | Token with Workers Scripts, Containers and Routes write access |
-| `CLOUDFLARE_ACCOUNT_ID` | Workers & Pages → Account ID |
-| `DATABASE_URL` | Neon connection URL (pasted as-is; the API converts `postgresql://` URLs) |
+| `CLOUDFLARE_API_TOKEN` | Deploy Worker / Container / routes |
+| `CLOUDFLARE_ACCOUNT_ID` | Cloudflare account |
+| `DATABASE_URL` | Neon PostgreSQL connection string |
 
-Optional: `npx wrangler secret put TCG_POKEMONTCG_API_KEY` to give the API a Pokémon TCG API key. The
-`JWT_KEY` secret from the marketplace version is no longer used and can be deleted.
+Optional data-provider secrets:
 
-Upgrading from the marketplace version: the `PriceGuide` migration drops the old users, orders, order items and
-wishlist tables and creates `cards`, `price_snapshots` and `snapshot_runs`.
+| Secret | Purpose |
+|---|---|
+| `POKEMONTCG_API_KEY` | Higher legacy Pokémon TCG API rate limit |
+| `SCRYDEX_API_KEY` | Scrydex market intelligence |
+| `SCRYDEX_TEAM_ID` | Scrydex team |
 
-## Tests
+Optional billing secrets:
+
+| Secret | Purpose |
+|---|---|
+| `STRIPE_SECRET_KEY` | Stripe server API |
+| `STRIPE_WEBHOOK_SECRET` | Verify webhooks |
+| `STRIPE_PRO_MONTHLY_PRICE_ID` | Monthly Pro Price |
+| `STRIPE_PRO_ANNUAL_PRICE_ID` | Annual Pro Price |
+
+The deployment workflow always deploys the core app. Optional secrets are uploaded only when they exist, so missing Stripe or Scrydex credentials do not break deployment.
+
+## CI
 
 ```bash
-dotnet test PokemonTcgMarketplace.sln   # API against a real Postgres (Testcontainers) and a stubbed Pokémon TCG API
-cd frontend && npm test                 # Vitest + Testing Library
-npm ci && npm test                      # Worker routing and the Cron Trigger (repo root)
+dotnet test PokemonTcgMarketplace.sln
+cd frontend && npm test && npm run build
+cd .. && npm test && npm run typecheck
 ```
 
-- **API:**
-  - Set detail follows upstream pagination and computes the set's stats.
-  - Search escapes user input, so a quote can't add clauses to the upstream query.
-  - Two snapshot runs a week apart produce price history, movers and top cards, and a same-day rerun doesn't
-    duplicate rows.
-  - Trending down picks a steady decline, but not a noisy one with the same net drop, one with too few prices or
-    one under $2.
-  - Sleepers need a real listing gap, a flat 30 days and a plausible gap; new cards without 30 days of history
-    still count.
-  - Upstream outages return `502`.
-  - Predictions, on 60 days of synthetic history where one Pokémon climbs and another slides: no history gives
-    "insufficient history"; then the model trains, beats "no change" on held-out days, ranks the climbers top and
-    the sliders bottom, keeps each prediction inside its range, explains it, and scores an older checkpoint.
-  - Existing tests cover migrations, readiness and connection-string parsing.
-- **Frontend:**
-  - The card page shows every printing and a Shop now link to the card's TCGplayer listing, and handles 404s and
-    outages.
-  - The set page sorts (unpriced cards last), filters by rarity and finds cards by name or number.
-  - The Outlook page lists predictions with their top reason and the model's results, and explains an empty
-    state; the card page shows each printing's outlook with its reasons.
-  - The Market page shows trending-down cards with their sparklines and sleepers with their listing gap, and
-    explains an empty list while history is short.
-- **Worker:** API paths reach the container, `/internal` never does, and the two Cron Triggers start the snapshot
-  and the prediction run.
+GitHub Actions also checks for pending EF Core model changes.
+
+## Data integrity rules
+
+TCG Signal deliberately prefers an explicit unknown over false precision.
+
+- no fabricated sold counts.
+- no fabricated liquidity.
+- no silent replacement of one variant with another.
+- exact printing is retained in watchlists.
+- Scrydex raw intelligence uses Near Mint raw history for the requested variant.
+- graded and raw sold listings are not mixed for raw liquidity metrics.
+- source/provenance is displayed.
+- stale observations are flagged.
+- confidence explanations are deterministic.
+- ML predictions are withheld when validation fails to beat the baseline.
+- no promise that a card will appreciate or sell at a displayed value.
 
 ## Security notes
 
-- The API has no accounts and stores no personal data; the only secrets are the database URL and the optional
-  Pokémon TCG API key, both Worker secrets passed to the container at start.
-- The container runs as a non-root user and keeps no state.
-- This repository's history (before the cleanup commit) contains a previously committed cloud credentials file and
-  a `.env` with a database connection string. They are gone from the working tree, but still reachable in the git
-  history on GitHub; rotate those credentials.
+- production credentials are Cloudflare secrets, never frontend variables.
+- Stripe webhook signatures are verified server-side.
+- Stripe redirects do not grant Pro access.
+- all watchlist/alert mutations are scoped to the current device user.
+- internal cron endpoints are not forwarded by the Worker.
+- the API container runs non-root and stores no local state.
+- historic credentials previously committed to this repository should be considered compromised and rotated.
+
+## MVP follow-ups
+
+These are intentionally outside the current MVP definition:
+
+1. Complete catalog migration from the deprecated Pokémon TCG API to Scrydex.
+2. OIDC account login / cross-device profile sync.
+3. Email or push alert delivery.
+4. Collection quantities and true portfolio liquidation analysis.
+5. Graded-card Market Intelligence UI.
+6. Vision/scanner flow.
+7. Dealer / bulk workflow.
+8. Persistent Scrydex cache for high-traffic operation.
