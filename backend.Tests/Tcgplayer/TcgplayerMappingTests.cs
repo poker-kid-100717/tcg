@@ -1,3 +1,4 @@
+using PokemonTCG.API.Data;
 using PokemonTCG.API.Pricing.Tcgplayer;
 
 namespace PokemonTcgMarketplace.Backend.Tests.Tcgplayer

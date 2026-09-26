@@ -1,14 +1,6 @@
-namespace PokemonTCG.API.Pricing.Tcgplayer;
+using PokemonTCG.API.Data;
 
-/// <summary>A card's condition grade, as TCGplayer sells it.</summary>
-public enum CardCondition
-{
-    NearMint,
-    LightlyPlayed,
-    ModeratelyPlayed,
-    HeavilyPlayed,
-    Damaged,
-}
+namespace PokemonTCG.API.Pricing.Tcgplayer;
 
 /// <summary>Maps TCGplayer condition names to <see cref="CardCondition"/>.</summary>
 public static class TcgplayerConditions

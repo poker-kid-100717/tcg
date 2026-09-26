@@ -7,6 +7,9 @@ export interface Env {
   TCG_DATABASE_URL: string;
   /** Optional: raises the Pokémon TCG API's rate limit. */
   TCG_POKEMONTCG_API_KEY?: string;
+  /** Optional: TCGplayer Developer API keys. With both set, prices come straight from TCGplayer. */
+  TCG_TCGPLAYER_PUBLIC_KEY?: string;
+  TCG_TCGPLAYER_PRIVATE_KEY?: string;
 }
 
 /**
@@ -27,6 +30,9 @@ export class TcgApi extends Container<Env> {
       ASPNETCORE_ENVIRONMENT: "Production",
       ConnectionStrings__DefaultConnection: env.TCG_DATABASE_URL,
       ...(env.TCG_POKEMONTCG_API_KEY ? { PokemonTcgApi__ApiKey: env.TCG_POKEMONTCG_API_KEY } : {}),
+      ...(env.TCG_TCGPLAYER_PUBLIC_KEY && env.TCG_TCGPLAYER_PRIVATE_KEY
+        ? { Tcgplayer__PublicKey: env.TCG_TCGPLAYER_PUBLIC_KEY, Tcgplayer__PrivateKey: env.TCG_TCGPLAYER_PRIVATE_KEY }
+        : {}),
     };
   }
 }
@@ -48,9 +54,11 @@ export default {
       return env.ASSETS.fetch(request);
     }
 
-    // TLS ends here, so tell the API the original scheme and client IP.
+    // TLS ends here, so tell the API the original scheme, host and client IP.
+    // The host matters: the API checks a state-changing request's Origin against it.
     const headers = new Headers(request.headers);
     headers.set("X-Forwarded-Proto", url.protocol.slice(0, -1));
+    headers.set("X-Forwarded-Host", url.host);
     const clientIp = request.headers.get("CF-Connecting-IP");
     if (clientIp) headers.set("X-Forwarded-For", clientIp);
 
