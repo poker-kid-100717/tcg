@@ -54,13 +54,14 @@ public sealed class BestBuyInventoryProvider(
         var postalCode = stores.OrderBy(s => DistanceMiles(query.Latitude, query.Longitude, s.Lat, s.Lng))
             .Select(s => s.PostalCode)
             .First();
-        var storeMap = stores.ToDictionary(s => s.StoreId, StringComparer.OrdinalIgnoreCase);
+        var storeMap = stores.ToDictionary(s => s.StoreId.ToString(CultureInfo.InvariantCulture), StringComparer.OrdinalIgnoreCase);
         var observed = clock.GetUtcNow();
         var listings = new List<InventoryListing>();
 
         foreach (var product in products.Take(options.MaxProductsPerRefresh))
         {
-            var availability = await GetAvailabilityAsync(product.Sku, postalCode, cancellationToken);
+            var sku = product.Sku.ToString(CultureInfo.InvariantCulture);
+            var availability = await GetAvailabilityAsync(sku, postalCode, cancellationToken);
             foreach (var hit in availability.Stores)
             {
                 if (!storeMap.TryGetValue(hit.StoreId, out var store)) continue;
@@ -79,7 +80,7 @@ public sealed class BestBuyInventoryProvider(
                     store.Lat,
                     store.Lng,
                     Math.Round(distance, 1),
-                    product.Sku,
+                    sku,
                     product.Name,
                     Category(product.Name),
                     product.Image,
@@ -200,7 +201,7 @@ public sealed class BestBuyInventoryProvider(
     private sealed class BestBuyStore
     {
         [JsonPropertyName("storeId")]
-        public string StoreId { get; init; } = "";
+        public long StoreId { get; init; }
         [JsonPropertyName("name")]
         public string Name { get; init; } = "";
         [JsonPropertyName("address")]
@@ -226,7 +227,7 @@ public sealed class BestBuyInventoryProvider(
     private sealed class BestBuyProduct
     {
         [JsonPropertyName("sku")]
-        public string Sku { get; init; } = "";
+        public long Sku { get; init; }
         [JsonPropertyName("name")]
         public string Name { get; init; } = "";
         [JsonPropertyName("salePrice")]
