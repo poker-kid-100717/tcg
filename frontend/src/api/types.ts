@@ -170,7 +170,7 @@ export interface Sleepers {
   cards: SleeperCard[];
 }
 
-export type PredictionStatus = 'Running' | 'Published' | 'Withheld' | 'InsufficientHistory' | 'Skipped' | 'Failed';
+export type PredictionStatus = 'Running' | 'Published' | 'Preview' | 'Withheld' | 'InsufficientHistory' | 'Skipped' | 'Failed';
 
 export interface PredictionReason {
   feature: string;
@@ -225,6 +225,8 @@ export interface ModelSummary {
   horizonDays: number;
   trainingRows: number;
   validationRows: number;
+  historyDays: number;
+  approxHistoryDaysNeeded: number;
   typicalErrorPercent: number | null;
   noChangeErrorPercent: number | null;
   directionAccuracyPercent: number | null;
