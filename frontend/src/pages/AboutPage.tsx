@@ -8,8 +8,18 @@ const layers = [
 const decisions = [
   {
     choice: 'Prices link out to TCGplayer instead of an in-app checkout',
-    instead: 'a cart, orders and accounts',
-    why: 'This is a price guide, not a store. TCGplayer already has the inventory, sellers and checkout, so each card has a Shop now button that opens its TCGplayer listing. The app stays focused on what it adds: prices across every set, and how they move over time.',
+    instead: 'a cart and orders',
+    why: 'This is a collection tracker, not a store. TCGplayer already has the inventory, sellers and checkout, so each card has a Shop now button that opens its TCGplayer listing. The app stays focused on what it adds: what your cards are worth, how that moves, and what the rest of a set would cost.',
+  },
+  {
+    choice: 'Guest-first accounts: the first card you add creates a real account, kept by a cookie',
+    instead: 'a sign-up wall, or a collection kept only in browser storage',
+    why: 'Nobody signs up before seeing the point. A guest account lives in Postgres like any other, so saving it later is just adding an email and password (same account, same cards), and signing in elsewhere merges the guest’s cards. Cookie sessions are protected by requiring JSON plus a same-origin check on every state-changing call.',
+  },
+  {
+    choice: 'Three values, each with a confidence rating',
+    instead: 'one “collection value” at Near Mint market price',
+    why: 'Most trackers show the most flattering number. Here each copy is also valued in its actual condition and at what it would net after TCGplayer’s seller fees, and every price says how far to trust it: a card whose price hasn’t moved in six weeks, or whose cheapest listing is double the market price, is marked low confidence.',
   },
   {
     choice: 'Card data goes through the API, not straight from the browser to the Pokémon TCG API',

@@ -1,14 +1,27 @@
-# Pokémon TCG Price Guide
+# TCG Collector: Pokémon card collection tracker
 
 [![CI](https://github.com/poker-kid-100717/tcg/actions/workflows/ci.yml/badge.svg)](https://github.com/poker-kid-100717/tcg/actions/workflows/ci.yml)
 
 **Live: [tcg-portfolio-sample.app](https://tcg-portfolio-sample.app)**
 
-A price guide and set guide for the Pokémon Trading Card Game. It shows the TCGplayer market price of every card in
-every set, records prices daily to build a price history and a list of the week's biggest movers, and links each card
-to its TCGplayer listing with a **Shop now** button. It doesn't sell anything itself.
+A collection tracker for the Pokémon Trading Card Game, built on a full price guide. Collectors add the cards they own
+(printing, condition, quantity, what they paid) and see what the collection is really worth: not one inflated number
+but three: **market value**, **value in the condition they actually have**, and **what it would net after TCGplayer
+seller fees**. Every price carries a **confidence rating** (how recently it moved, how many days of data, how far the
+cheapest listing sits from it), so a stale $400 price isn't taken at face value. It doesn't sell anything itself;
+cards link to their TCGplayer listing.
 
-- **Sets:** every set, grouped by series. Each set page lists every card with its market price, the set's total
+- **My collection (home):** summary tiles (market, condition-adjusted, net if sold, gain on cost), a 90-day value
+  chart, heads-ups (consider selling / watch / hold, from steady down-trends, gains on cost and the price model), every
+  holding with inline quantity/condition/cost edits, and set progress with the **cost to finish each set**. Starts
+  with no sign-up: the first add creates a guest collection, which can be saved with an email later (signing in from
+  another device merges the guest's cards). A one-click sample collection shows it off. CSV export is spreadsheet-safe.
+- **Wishlist:** target prices, a suggested target from the low end of 90 days of prices, and a flag when the market
+  price or cheapest listing reaches it.
+
+- **Sets:** every set, grouped by series. Signed-in collectors see which cards they have, can filter to the cards
+  they still need, add a card in one click, and see what the rest of the set costs (main set and with secret rares).
+  Each set page lists every card with its market price, the set's total
   market value and most valuable card, with sorting (collector number, price, name), a rarity filter and a
   find-in-set box. Sort and rarity are kept in the URL, so a filtered view can be shared.
 - **Cards:** the TCGplayer market, low, mid and high price for each printing (holofoil, reverse holo, first
@@ -81,7 +94,15 @@ worker/index.ts              Routing, container binding, daily Cron Trigger
 | `GET` | `/api/predictions?direction=up` | Cards the model predicts will rise (or `down`), with range and reasons |
 | `GET` | `/api/cards/{id}/predictions` | The card's prediction for each printing |
 | `GET` | `/api/predictions/model` | The current model: status, held-out error vs "no change", feature importance, track record |
-| `GET` | `/api/market/status` | When prices were last recorded and how many days of history exist |
+| `GET` | `/api/market/status` | When prices were last recorded, how many days of history exist, and the price source |
+| `GET` | `/api/account` | Who's signed in (guest or saved account) |
+| `POST` | `/api/account/guest`, `/register`, `/login`, `/logout`; `DELETE /api/account` | Guest-first accounts: cookie session, rate-limited sign-in with lockout |
+| `GET` | `/api/collection` | Summary, holdings with values and price confidence, 90-day value history, set progress, heads-ups |
+| `POST`/`PATCH`/`DELETE` | `/api/collection/items[/{id}]` | Add (stacks matching copies, averaging cost), edit, remove |
+| `GET` | `/api/collection/cards/{id}`, `/api/collection/sets/{id}` | Copies of a card you own; a set checklist with the missing cards' prices and cost to complete |
+| `POST` | `/api/collection/sample` | Fills an empty collection with ~24 real cards |
+| `GET` | `/api/collection/export.csv` | The collection as CSV |
+| `GET`/`POST`/`DELETE` | `/api/wishlist[/{id}]` | Wishlist with target prices |
 | `GET` | `/health`, `/health/live` | Readiness (database and migrations) and liveness |
 | `POST` | `/internal/snapshots` | Runs the price snapshot. Called by the Cron Trigger; the Worker never forwards `/internal` from the internet |
 | `POST` | `/internal/predictions` | Retrains the model and refreshes predictions. Called by the second Cron Trigger |
@@ -172,7 +193,14 @@ drift check on pull requests and pushes.
 | `CLOUDFLARE_ACCOUNT_ID` | Workers & Pages → Account ID |
 | `DATABASE_URL` | Neon connection URL (pasted as-is; the API converts `postgresql://` URLs) |
 
-Optional: `npx wrangler secret put TCG_POKEMONTCG_API_KEY` to give the API a Pokémon TCG API key. The
+Optional: `npx wrangler secret put TCG_POKEMONTCG_API_KEY` to give the API a Pokémon TCG API key.
+
+**TCGplayer Developer API (optional):** set both `npx wrangler secret put TCG_TCGPLAYER_PUBLIC_KEY` and
+`npx wrangler secret put TCG_TCGPLAYER_PRIVATE_KEY` (locally: `Tcgplayer__PublicKey` / `Tcgplayer__PrivateKey`). With
+them, the daily snapshot matches every set to its TCGplayer group and every card to its product, takes the day's
+market/low/mid/high prices straight from TCGplayer, links cards to their product pages, and the footer switches to
+TCGplayer's required attribution. Without them, prices are TCGplayer's market prices as republished daily by the
+Pokémon TCG API. Nothing else changes, so the keys can be added or removed at any time. The
 `JWT_KEY` secret from the marketplace version is no longer used and can be deleted.
 
 Upgrading from the marketplace version: the `PriceGuide` migration drops the old users, orders, order items and
