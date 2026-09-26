@@ -3,7 +3,9 @@ namespace PokemonTCG.API.Product;
 public record AccountView(
     Guid Id,
     bool BillingConfigured,
+    bool StoreFinderBillingConfigured,
     bool IsPro,
+    bool HasStoreFinder,
     string Plan,
     string? SubscriptionStatus,
     string Mode);
