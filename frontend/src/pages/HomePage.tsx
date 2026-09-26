@@ -24,13 +24,13 @@ export default function HomePage() {
     <>
       <section className="bg-pokemon-pokeblue pb-14 text-white">
         <div className="container-custom grid gap-6 pt-10 sm:pt-14">
-          <p className="text-xs font-semibold tracking-wider text-pokemon-yellow uppercase">Pokémon TCG price guide</p>
+          <p className="text-xs font-semibold tracking-wider text-pokemon-yellow uppercase">Pokémon market intelligence</p>
           <h1 className="max-w-3xl text-4xl leading-tight text-white sm:text-5xl">
-            What is your card worth today?
+            What is this card actually worth — and how much should you trust that number?
           </h1>
           <p className="max-w-2xl text-lg text-white/80">
-            TCGplayer market prices for every card in every set, with a daily price history. Found the one you want?
-            Every card links straight to its TCGplayer listing.
+            TCG Signal combines card pricing, history, market confidence, sold comps when available, watch alerts,
+            deal math, and a validated price outlook. Start with the card; then inspect the evidence behind the number.
           </p>
           <form role="search" onSubmit={submit} className="flex max-w-xl gap-2">
             <label htmlFor="hero-search" className="sr-only">
@@ -52,6 +52,23 @@ export default function HomePage() {
       </section>
 
       <div className="container-custom grid gap-12 py-10">
+        <section className="grid gap-4 md:grid-cols-3">
+          <Link to="/deal" className="panel grid gap-2 p-5 transition hover:border-pokemon-blue">
+            <p className="eyebrow">Buying or selling?</p>
+            <h2 className="text-xl">Analyze the deal</h2>
+            <p className="text-sm leading-6 text-slate-600">Put an asking price next to market reference, fees, tax, shipping and break-even math.</p>
+          </Link>
+          <Link to="/watchlist" className="panel grid gap-2 p-5 transition hover:border-pokemon-blue">
+            <p className="eyebrow">Watch exact printings</p>
+            <h2 className="text-xl">Set your thresholds</h2>
+            <p className="text-sm leading-6 text-slate-600">Get in-app alerts after daily snapshots cross the prices or movement levels you care about.</p>
+          </Link>
+          <Link to="/pro" className="panel grid gap-2 p-5 transition hover:border-pokemon-blue">
+            <p className="eyebrow">Market Intelligence</p>
+            <h2 className="text-xl">See the evidence</h2>
+            <p className="text-sm leading-6 text-slate-600">Confidence, freshness, volatility, liquidity and recent sold comps when the premium provider is configured.</p>
+          </Link>
+        </section>
         {sets.data && (
           <section className="grid gap-4">
             <div className="flex items-baseline justify-between">

@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.EntityFrameworkCore;
 using PokemonTCG.API.Data;
+using PokemonTCG.API.Product;
 
 namespace PokemonTCG.API.Pricing;
 
@@ -54,10 +55,16 @@ public static class PriceGuideEndpoints
         // Not under /api: the Worker only forwards /api and /health from the
         // internet, so this is reachable from the Worker's Cron Trigger (and
         // locally), never from a browser.
-        app.MapPost("/internal/snapshots", async Task<IResult> (PriceSnapshotService snapshots, CancellationToken ct) =>
-            await snapshots.RunAsync(ct) is { } result
-                ? Results.Ok(result)
-                : Results.Conflict(new { message = "A snapshot run is already in progress." }));
+        app.MapPost("/internal/snapshots", async Task<IResult> (
+            PriceSnapshotService snapshots,
+            AlertEvaluationService alerts,
+            CancellationToken ct) =>
+        {
+            var result = await snapshots.RunAsync(ct);
+            if (result is null) return Results.Conflict(new { message = "A snapshot run is already in progress." });
+            if (result.Status == SnapshotStatus.Succeeded) await alerts.EvaluateAsync(ct);
+            return Results.Ok(result);
+        });
     }
 }
 

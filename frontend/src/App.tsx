@@ -13,6 +13,10 @@ const SearchPage = lazy(() => import('./pages/SearchPage'));
 const MarketPage = lazy(() => import('./pages/MarketPage'));
 const AboutPage = lazy(() => import('./pages/AboutPage'));
 const OutlookPage = lazy(() => import('./pages/OutlookPage'));
+const DealAnalyzerPage = lazy(() => import('./pages/DealAnalyzerPage'));
+const WatchlistPage = lazy(() => import('./pages/WatchlistPage'));
+const DashboardPage = lazy(() => import('./pages/DashboardPage'));
+const ProPage = lazy(() => import('./pages/ProPage'));
 
 export default function App() {
   return (
@@ -27,6 +31,10 @@ export default function App() {
             <Route path="search" element={<SearchPage />} />
             <Route path="market" element={<MarketPage />} />
             <Route path="outlook" element={<OutlookPage />} />
+            <Route path="deal" element={<DealAnalyzerPage />} />
+            <Route path="watchlist" element={<WatchlistPage />} />
+            <Route path="dashboard" element={<DashboardPage />} />
+            <Route path="pro" element={<ProPage />} />
             <Route path="about" element={<AboutPage />} />
             <Route path="*" element={<NotFound />} />
           </Route>

@@ -234,3 +234,106 @@ export interface ModelSummary {
   trackRecord: RealizedAccuracy[];
   message: string | null;
 }
+
+
+export interface Account {
+  id: string;
+  billingConfigured: boolean;
+  isPro: boolean;
+  plan: string;
+  subscriptionStatus: string | null;
+  mode: string;
+}
+
+export interface SoldComp {
+  id: string;
+  source: string;
+  title: string | null;
+  price: number;
+  soldAt: string;
+  url: string | null;
+}
+
+export interface MarketIntelligence {
+  cardId: string;
+  variant: string;
+  variantLabel: string;
+  source: string;
+  asOf: string;
+  market: number | null;
+  low: number | null;
+  mid: number | null;
+  high: number | null;
+  change7Percent: number | null;
+  change30Percent: number | null;
+  volatilityPercent: number | null;
+  spreadPercent: number | null;
+  observationDays: number;
+  confidenceScore: number;
+  confidenceBand: string;
+  isStale: boolean;
+  liquidity: string;
+  liquidityReason: string;
+  soldComps30Days: number | null;
+  medianSold30Days: number | null;
+  lastSoldPrice: number | null;
+  lastSoldAt: string | null;
+  recentSoldComps: SoldComp[];
+  reasons: string[];
+}
+
+export interface WatchlistItem {
+  id: number;
+  cardId: string;
+  variant: string;
+  variantLabel: string;
+  cardName: string;
+  setName: string;
+  imageUrl: string | null;
+  baselinePrice: number | null;
+  currentPrice: number | null;
+  targetBelow: number | null;
+  targetAbove: number | null;
+  movePercent: number | null;
+  enabled: boolean;
+  createdAt: string;
+}
+
+export interface WatchlistInput {
+  cardId: string;
+  variant: string;
+  cardName: string;
+  setName: string;
+  imageUrl: string | null;
+  targetBelow: number | null;
+  targetAbove: number | null;
+  movePercent: number | null;
+}
+
+export interface WatchlistUpdate {
+  targetBelow: number | null;
+  targetAbove: number | null;
+  movePercent: number | null;
+  enabled: boolean;
+}
+
+export interface AlertEvent {
+  id: number;
+  watchlistItemId: number;
+  kind: string;
+  message: string;
+  currentValue: number | null;
+  createdAt: string;
+  readAt: string | null;
+}
+
+export interface Dashboard {
+  account: Account;
+  watchlist: WatchlistItem[];
+  alerts: AlertEvent[];
+  unreadAlerts: number;
+}
+
+export interface BillingLink {
+  url: string;
+}

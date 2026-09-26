@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom';
 
-import { useMarketStatus } from '../api/hooks';
+import { useMarketStatus, useSession } from '../api/hooks';
 import { formatDate } from '../lib/format';
 
 function SearchForm({ className = '' }: { className?: string }) {
@@ -39,6 +39,7 @@ const navClass = ({ isActive }: { isActive: boolean }) =>
 
 export function Layout() {
   const status = useMarketStatus();
+  const session = useSession();
   return (
     <div className="flex min-h-screen flex-col">
       <a href="#main" className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:rounded focus:bg-white focus:px-3 focus:py-2">
@@ -50,7 +51,7 @@ export function Layout() {
             <span aria-hidden="true" className="grid h-8 w-8 place-items-center rounded-full bg-pokemon-yellow text-sm font-black text-pokemon-pokeblue">
               $
             </span>
-            TCG Price Guide
+            TCG Signal
           </Link>
           <nav aria-label="Main" className="flex items-center gap-1">
             <NavLink to="/sets" className={navClass}>
@@ -62,11 +63,23 @@ export function Layout() {
             <NavLink to="/outlook" className={navClass}>
               Outlook
             </NavLink>
-            <NavLink to="/about" className={navClass}>
-              How it works
+            <NavLink to="/deal" className={navClass}>
+              Deal
+            </NavLink>
+            <NavLink to="/watchlist" className={navClass}>
+              Watchlist
+            </NavLink>
+            <NavLink to="/dashboard" className={navClass}>
+              Dashboard
             </NavLink>
           </nav>
-          <SearchForm className="order-last w-full sm:order-none sm:ml-auto sm:w-72" />
+          <SearchForm className="order-last w-full lg:order-none lg:ml-auto lg:w-64" />
+          <Link
+            to="/pro"
+            className="rounded-full bg-pokemon-yellow px-3 py-1.5 text-xs font-extrabold text-pokemon-pokeblue"
+          >
+            {session.data?.isPro ? (session.data.billingConfigured ? 'PRO' : 'PRO PREVIEW') : 'GET PRO'}
+          </Link>
         </div>
       </header>
 
@@ -77,7 +90,7 @@ export function Layout() {
       <footer className="border-t border-slate-200 bg-white">
         <div className="container-custom flex flex-wrap items-center justify-between gap-3 py-6 text-sm text-slate-500">
           <p>
-            Prices are TCGplayer market prices via the Pokémon TCG API
+            TCG Signal uses TCGplayer pricing via the Pokémon TCG API
             {status.data?.lastSnapshotAt ? `, last recorded ${formatDate(status.data.lastSnapshotAt, 'short')}` : ''}.
             Not affiliated with Nintendo, The Pokémon Company or TCGplayer.
           </p>
