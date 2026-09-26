@@ -8,8 +8,8 @@ public sealed class ProductStore(string connectionString)
 {
     private readonly string _connectionString = connectionString;
 
-    internal sealed record UserRow(Guid Id, string? Email);
-    internal sealed record SubscriptionRow(
+    public sealed record UserRow(Guid Id, string? Email);
+    public sealed record SubscriptionRow(
         Guid UserId,
         string? CustomerId,
         string? SubscriptionId,
@@ -18,7 +18,7 @@ public sealed class ProductStore(string connectionString)
         DateTimeOffset? CurrentPeriodEnd,
         bool CancelAtPeriodEnd);
 
-    internal sealed record WatchTarget(
+    public sealed record WatchTarget(
         long Id,
         Guid UserId,
         string CardId,
