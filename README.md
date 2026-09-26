@@ -258,7 +258,7 @@ If Stripe is not configured, every device receives Pro access in **Founding Prev
 | PUT/DELETE | `/api/watchlist/{id}` | Watch threshold management |
 | GET | `/api/alerts` | In-app alert feed |
 | GET | `/api/dashboard` | Personalized dashboard |
-| GET | `/api/inventory/nearby?lat=&lng=&radius=` | Entitled, verified nearby store inventory |
+| POST | `/api/inventory/nearby` | Entitled nearby inventory; coordinates stay in request body |
 | POST | `/api/billing/checkout` | Stripe Checkout |
 | POST | `/api/billing/portal` | Stripe Customer Portal |
 | POST | `/api/billing/webhook` | Signed Stripe events |
