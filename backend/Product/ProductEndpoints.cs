@@ -253,6 +253,7 @@ public static class ProductEndpoints
             SessionService sessions,
             EntitlementService entitlements,
             ProductStore store,
+            BillingOptions options,
             StripeBillingService stripe,
             CancellationToken ct) =>
         {
@@ -261,8 +262,14 @@ public static class ProductEndpoints
             if (!account.BillingConfigured)
                 return Results.Problem(statusCode: 503, title: "Billing is in preview mode", detail: "Stripe keys and Price IDs have not been configured yet.");
 
-            if (request.Plan is not ("monthly" or "annual"))
-                return Results.ValidationProblem(new Dictionary<string, string[]> { ["plan"] = ["Choose monthly or annual."] });
+            if (request.Plan is not ("monthly" or "annual" or "storefinder" or "complete"))
+                return Results.ValidationProblem(new Dictionary<string, string[]> { ["plan"] = ["Choose a supported subscription plan."] });
+
+            if (request.Plan == "storefinder" && !account.StoreFinderBillingConfigured)
+                return Results.Problem(statusCode: 503, title: "Store Finder billing is not configured yet.");
+
+            if (request.Plan == "complete" && string.IsNullOrWhiteSpace(options.CompleteMonthlyPriceId))
+                return Results.Problem(statusCode: 503, title: "Complete plan billing is not configured yet.");
 
             var subscription = await store.GetSubscriptionAsync(user.Id, ct);
             var url = await stripe.CreateCheckoutAsync(user.Id, request.Plan, subscription?.CustomerId, ct);
