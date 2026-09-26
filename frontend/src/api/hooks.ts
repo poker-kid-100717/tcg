@@ -1,4 +1,4 @@
-import { keepPreviousData, useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { api, ApiError } from './client';
 
@@ -60,3 +60,107 @@ export const useCardPredictions = (cardId: string) =>
 
 export const useModelSummary = () =>
   useQuery({ queryKey: ['model'], queryFn: ({ signal }) => api.model(signal), staleTime: minutes(30) });
+
+
+export const useSession = () =>
+  useQuery({
+    queryKey: ['session'],
+    queryFn: () => api.session(),
+    staleTime: Infinity,
+    retry: 1,
+  });
+
+export const useIntelligence = (cardId: string, variant: string, enabled = true) =>
+  useQuery({
+    queryKey: ['intelligence', cardId, variant],
+    queryFn: ({ signal }) => api.intelligence(cardId, variant, signal),
+    enabled: enabled && cardId.length > 0 && variant.length > 0,
+    staleTime: minutes(30),
+    retry: shouldRetry,
+  });
+
+export const useWatchlist = () =>
+  useQuery({
+    queryKey: ['watchlist'],
+    queryFn: ({ signal }) => api.watchlist(signal),
+    staleTime: minutes(5),
+  });
+
+export const useAlerts = () =>
+  useQuery({
+    queryKey: ['alerts'],
+    queryFn: ({ signal }) => api.alerts(signal),
+    staleTime: minutes(2),
+  });
+
+export const useDashboard = () =>
+  useQuery({
+    queryKey: ['dashboard'],
+    queryFn: ({ signal }) => api.dashboard(signal),
+    staleTime: minutes(2),
+  });
+
+export const useAddWatch = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.addWatch,
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['watchlist'] }),
+        queryClient.invalidateQueries({ queryKey: ['dashboard'] }),
+      ]);
+    },
+  });
+};
+
+export const useUpdateWatch = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, input }: { id: number; input: import('./types').WatchlistUpdate }) => api.updateWatch(id, input),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['watchlist'] }),
+        queryClient.invalidateQueries({ queryKey: ['dashboard'] }),
+      ]);
+    },
+  });
+};
+
+export const useDeleteWatch = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.deleteWatch,
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['watchlist'] }),
+        queryClient.invalidateQueries({ queryKey: ['dashboard'] }),
+      ]);
+    },
+  });
+};
+
+export const useReadAlert = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.readAlert,
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['alerts'] }),
+        queryClient.invalidateQueries({ queryKey: ['dashboard'] }),
+      ]);
+    },
+  });
+};
+
+export const useReadAllAlerts = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.readAllAlerts,
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['alerts'] }),
+        queryClient.invalidateQueries({ queryKey: ['dashboard'] }),
+      ]);
+    },
+  });
+};
