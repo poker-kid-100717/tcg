@@ -160,6 +160,93 @@ public static class ProductEndpoints
             return Results.Ok(new DashboardView(account, watchlist, alerts, alerts.Count(a => a.ReadAt is null)));
         });
 
+        api.MapGet("/master-sets", async (
+            HttpContext context,
+            SessionService sessions,
+            MasterSetStore masterSets,
+            CancellationToken ct) =>
+        {
+            var user = await sessions.GetOrCreateAsync(context, ct);
+            return Results.Ok(await masterSets.GetSummariesAsync(user.Id, ct));
+        });
+
+        api.MapPost("/master-sets", async Task<IResult> (
+            CreateMasterSetRequest request,
+            HttpContext context,
+            SessionService sessions,
+            EntitlementService entitlements,
+            MasterSetStore masterSets,
+            MasterSetService service,
+            CancellationToken ct) =>
+        {
+            var user = await sessions.GetOrCreateAsync(context, ct);
+            var account = await entitlements.GetAccountAsync(user.Id, ct);
+            if (!account.IsPro && await masterSets.CountAsync(user.Id, ct) >= 1)
+                return Results.Problem(statusCode: 403, title: "Free master-set limit reached", detail: "Pro unlocks unlimited master sets.");
+
+            var id = await service.CreateAsync(user.Id, request.SetId, ct);
+            return id is { } value ? Results.Ok(new { id = value }) : Results.NotFound();
+        });
+
+        api.MapGet("/master-sets/{id:long}", async Task<IResult> (
+            long id,
+            HttpContext context,
+            SessionService sessions,
+            MasterSetStore masterSets,
+            CancellationToken ct) =>
+        {
+            var user = await sessions.GetOrCreateAsync(context, ct);
+            return await masterSets.GetDetailAsync(user.Id, id, ct) is { } value
+                ? Results.Ok(value)
+                : Results.NotFound();
+        });
+
+        api.MapPut("/master-sets/{id:long}/items", async Task<IResult> (
+            long id,
+            UpdateMasterSetItemRequest request,
+            HttpContext context,
+            SessionService sessions,
+            MasterSetStore masterSets,
+            TimeProvider clock,
+            CancellationToken ct) =>
+        {
+            if (request.OwnedQuantity < 0)
+                return Results.ValidationProblem(new Dictionary<string, string[]> { ["ownedQuantity"] = ["Owned quantity cannot be negative."] });
+            if (request.AcquiredPrice < 0)
+                return Results.ValidationProblem(new Dictionary<string, string[]> { ["acquiredPrice"] = ["Acquired price cannot be negative."] });
+            var user = await sessions.GetOrCreateAsync(context, ct);
+            return await masterSets.UpdateItemAsync(user.Id, id, request, clock.GetUtcNow(), ct)
+                ? Results.NoContent()
+                : Results.NotFound();
+        });
+
+        api.MapDelete("/master-sets/{id:long}", async Task<IResult> (
+            long id,
+            HttpContext context,
+            SessionService sessions,
+            MasterSetStore masterSets,
+            CancellationToken ct) =>
+        {
+            var user = await sessions.GetOrCreateAsync(context, ct);
+            return await masterSets.DeleteAsync(user.Id, id, ct) ? Results.NoContent() : Results.NotFound();
+        });
+
+        api.MapGet("/master-sets/{id:long}/advisor-context", async Task<IResult> (
+            long id,
+            HttpContext context,
+            SessionService sessions,
+            EntitlementService entitlements,
+            MasterSetService service,
+            CancellationToken ct) =>
+        {
+            var user = await sessions.GetOrCreateAsync(context, ct);
+            var account = await entitlements.GetAccountAsync(user.Id, ct);
+            if (!account.IsPro) return ProRequired();
+            return await service.GetAdvisorContextAsync(user.Id, id, ct) is { } value
+                ? Results.Ok(value)
+                : Results.NotFound();
+        });
+
         api.MapPost("/billing/checkout", async Task<IResult> (
             CheckoutRequest request,
             HttpContext context,
