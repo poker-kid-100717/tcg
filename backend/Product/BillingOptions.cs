@@ -12,15 +12,17 @@ public sealed class BillingOptions
     public string CompleteMonthlyPriceId { get; set; } = "";
     public string SiteUrl { get; set; } = "https://tcg-portfolio-sample.app";
 
-    public bool IsConfigured =>
+    public bool StripeConfigured =>
         !string.IsNullOrWhiteSpace(StripeSecretKey) &&
-        !string.IsNullOrWhiteSpace(StripeWebhookSecret) &&
+        !string.IsNullOrWhiteSpace(StripeWebhookSecret);
+
+    public bool IsConfigured =>
+        StripeConfigured &&
         !string.IsNullOrWhiteSpace(ProMonthlyPriceId) &&
         !string.IsNullOrWhiteSpace(ProAnnualPriceId);
 
     public bool StoreFinderIsConfigured =>
-        !string.IsNullOrWhiteSpace(StripeSecretKey) &&
-        !string.IsNullOrWhiteSpace(StripeWebhookSecret) &&
+        StripeConfigured &&
         !string.IsNullOrWhiteSpace(StoreFinderMonthlyPriceId);
 }
 
