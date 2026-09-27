@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Http.Resilience;
+using PokemonTCG.API.Accounts;
 using PokemonTCG.API.Data;
 using PokemonTCG.API.Pricing;
 using PokemonTCG.API.Pricing.Predictions;
@@ -94,6 +95,7 @@ builder.Services.AddScoped<IMarketDataProvider, PokemonTcgMarketDataProvider>();
 builder.Services.AddScoped<IMarketDataProvider, TcgplayerMarketDataProvider>();
 builder.Services.Configure<EbayOptions>(builder.Configuration.GetSection(EbayOptions.SectionName));
 builder.Services.AddScoped<ICompProvider, EbayCompProvider>();
+builder.Services.AddScoped<ICompProvider, ScrydexCompProvider>();
 builder.Services.AddScoped<CompIngestionService>();
 builder.Services.AddScoped<MarketStatusService>();
 builder.Services.AddSingleton<SnapshotGate>();
@@ -104,15 +106,15 @@ builder.Services.AddScoped<PriceGuideService>();
 builder.Services.AddSingleton(builder.Configuration.GetSection(PredictionOptions.SectionName).Get<PredictionOptions>() ?? new());
 builder.Services.AddScoped<PredictionService>();
 
-// TCG Signal MVP: device-bound collector profiles, watchlists, explainable market
-// intelligence and optional Stripe subscriptions. Without Stripe configuration,
-// the app deliberately runs as a full-feature founding preview.
+// TCG Signal: accounts, watchlists and alerts, explainable market intelligence and
+// Stripe subscriptions. Entitlements come only from verified billing state: without
+// Stripe configured, everyone is on the free plan.
 var billingOptions = builder.Configuration.GetSection(BillingOptions.SectionName).Get<BillingOptions>() ?? new();
 builder.Services.AddSingleton(billingOptions);
 builder.Services.AddSingleton(new ProductStore(normalizedConnectionString));
 builder.Services.AddSingleton(new MasterSetStore(normalizedConnectionString));
 builder.Services.AddScoped<MasterSetService>();
-builder.Services.AddScoped<SessionService>();
+
 builder.Services.AddScoped<EntitlementService>();
 var scrydexOptions = builder.Configuration.GetSection(ScrydexOptions.SectionName).Get<ScrydexOptions>() ?? new();
 builder.Services.AddSingleton(scrydexOptions);
@@ -124,6 +126,9 @@ builder.Services.AddHttpClient<ScrydexClient>(client =>
 builder.Services.AddScoped<MarketIntelligenceService>();
 builder.Services.AddScoped<AlertEvaluationService>();
 builder.Services.AddHttpClient<StripeBillingService>();
+
+// Accounts: OpenID Connect sign-in with a server-side session cookie, the RequirePro policy and rate limits.
+builder.AddTcgSignalAuth();
 
 var app = builder.Build();
 
@@ -141,9 +146,14 @@ if (app.Environment.IsDevelopment())
 // one origin through the Worker, and the Vite dev server proxies /api.
 app.UseForwardedHeaders();
 app.UseMiddleware<DatabaseReadinessMiddleware>();
+app.UseMiddleware<SameSiteRequestMiddleware>();
+app.UseAuthentication();
+app.UseRateLimiter();
+app.UseAuthorization();
 
 app.MapPriceGuide();
 app.MapPredictions();
+app.MapAuth();
 app.MapProduct();
 app.MapHealthChecks("/health");
 app.MapHealthChecks("/health/live", new HealthCheckOptions { Predicate = _ => false });

@@ -5,6 +5,21 @@ using System.Text.Json;
 
 namespace PokemonTCG.API.Product;
 
+/// <summary>A subscription as Stripe reports it now.</summary>
+public sealed record StripeSubscription(
+    string Id,
+    string? CustomerId,
+    string Status,
+    string? Plan,
+    DateTimeOffset? CurrentPeriodEnd,
+    bool CancelAtPeriodEnd,
+    Guid? UserId);
+
+/// <summary>
+/// Stripe Checkout, the Customer Portal and webhooks. Stripe is the billing source of truth: webhook events are verified
+/// by signature, recorded once (duplicates are skipped), and every subscription change is applied by re-reading the
+/// subscription from Stripe, so the stored state is Stripe's current state whatever order events arrive in.
+/// </summary>
 public sealed class StripeBillingService(
     HttpClient http,
     BillingOptions options,
@@ -12,185 +27,181 @@ public sealed class StripeBillingService(
     TimeProvider clock,
     ILogger<StripeBillingService> logger)
 {
-    public async Task<string> CreateCheckoutAsync(
-        Guid userId,
-        string plan,
-        string? existingCustomerId,
-        CancellationToken cancellationToken)
+    private const string Api = "https://api.stripe.com/v1/";
+
+    public async Task<string> CreateCheckoutAsync(Guid userId, string plan, string? existingCustomerId, string? email, CancellationToken cancellationToken)
     {
         EnsureConfigured();
-        var normalized = plan.ToLowerInvariant() switch
+        var priceId = plan switch
         {
-            "monthly" => "monthly",
-            "annual" => "annual",
-            "storefinder" => "storefinder",
-            "complete" => "complete",
-            _ => throw new ArgumentException("Unknown subscription plan.", nameof(plan)),
-        };
-        var priceId = normalized switch
-        {
+            "monthly" => options.ProMonthlyPriceId,
             "annual" => options.ProAnnualPriceId,
             "storefinder" => options.StoreFinderMonthlyPriceId,
             "complete" => options.CompleteMonthlyPriceId,
-            _ => options.ProMonthlyPriceId,
+            _ => throw new ArgumentException("Unknown subscription plan.", nameof(plan)),
         };
-        if (string.IsNullOrWhiteSpace(priceId))
-            throw new InvalidOperationException($"Stripe price for {normalized} is not configured.");
+        if (string.IsNullOrWhiteSpace(priceId)) throw new InvalidOperationException($"Stripe price for {plan} is not configured.");
 
         var site = options.SiteUrl.TrimEnd('/');
-
         var fields = new Dictionary<string, string>
         {
             ["mode"] = "subscription",
-            ["success_url"] = normalized is "storefinder" or "complete"
-                ? $"{site}/available-in-stores?checkout=success"
-                : $"{site}/dashboard?checkout=success",
+            // Landing here grants nothing: entitlements change only when the verified webhook arrives.
+            ["success_url"] = plan is "storefinder" or "complete" ? $"{site}/available-in-stores?checkout=success" : $"{site}/dashboard?checkout=success",
             ["cancel_url"] = $"{site}/pro?checkout=cancelled",
             ["client_reference_id"] = userId.ToString(),
             ["line_items[0][price]"] = priceId,
             ["line_items[0][quantity]"] = "1",
             ["allow_promotion_codes"] = "true",
             ["metadata[user_id]"] = userId.ToString(),
-            ["metadata[plan]"] = normalized,
             ["subscription_data[metadata][user_id]"] = userId.ToString(),
-            ["subscription_data[metadata][plan]"] = normalized,
         };
         if (!string.IsNullOrWhiteSpace(existingCustomerId)) fields["customer"] = existingCustomerId;
+        else if (!string.IsNullOrWhiteSpace(email)) fields["customer_email"] = email;
 
-        using var request = new HttpRequestMessage(HttpMethod.Post, "https://api.stripe.com/v1/checkout/sessions")
-        {
-            Content = new FormUrlEncodedContent(fields),
-        };
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", options.StripeSecretKey);
-        using var response = await http.SendAsync(request, cancellationToken);
-        var body = await response.Content.ReadAsStringAsync(cancellationToken);
-        if (!response.IsSuccessStatusCode)
-            throw new HttpRequestException($"Stripe checkout failed ({(int)response.StatusCode}).");
-
-        using var json = JsonDocument.Parse(body);
-        return json.RootElement.GetProperty("url").GetString()
-            ?? throw new InvalidOperationException("Stripe did not return a checkout URL.");
+        using var json = await SendAsync(HttpMethod.Post, "checkout/sessions", fields, cancellationToken);
+        return json.RootElement.GetProperty("url").GetString() ?? throw new InvalidOperationException("Stripe did not return a checkout URL.");
     }
 
     public async Task<string> CreatePortalAsync(string customerId, CancellationToken cancellationToken)
     {
         EnsureConfigured();
-        var fields = new Dictionary<string, string>
+        using var json = await SendAsync(HttpMethod.Post, "billing_portal/sessions", new()
         {
             ["customer"] = customerId,
-            ["return_url"] = $"{options.SiteUrl.TrimEnd('/')}/pro",
-        };
-
-        using var request = new HttpRequestMessage(HttpMethod.Post, "https://api.stripe.com/v1/billing_portal/sessions")
-        {
-            Content = new FormUrlEncodedContent(fields),
-        };
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", options.StripeSecretKey);
-        using var response = await http.SendAsync(request, cancellationToken);
-        var body = await response.Content.ReadAsStringAsync(cancellationToken);
-        if (!response.IsSuccessStatusCode)
-            throw new HttpRequestException($"Stripe customer portal failed ({(int)response.StatusCode}).");
-
-        using var json = JsonDocument.Parse(body);
-        return json.RootElement.GetProperty("url").GetString()
-            ?? throw new InvalidOperationException("Stripe did not return a portal URL.");
+            ["return_url"] = $"{options.SiteUrl.TrimEnd('/')}/account",
+        }, cancellationToken);
+        return json.RootElement.GetProperty("url").GetString() ?? throw new InvalidOperationException("Stripe did not return a portal URL.");
     }
 
-    public async Task<bool> ProcessWebhookAsync(HttpRequest request, CancellationToken cancellationToken)
+    /// <summary>Cancels immediately (used when an account is deleted).</summary>
+    public async Task CancelNowAsync(string subscriptionId, CancellationToken cancellationToken)
     {
-        if (!options.IsConfigured) return false;
+        EnsureConfigured();
+        using var _ = await SendAsync(HttpMethod.Delete, $"subscriptions/{Uri.EscapeDataString(subscriptionId)}", null, cancellationToken);
+    }
 
-        using var reader = new StreamReader(request.Body, Encoding.UTF8);
-        var payload = await reader.ReadToEndAsync(cancellationToken);
-        var signature = request.Headers["Stripe-Signature"].ToString();
-        if (!VerifySignature(payload, signature))
+    public async Task<StripeSubscription> GetSubscriptionAsync(string subscriptionId, CancellationToken cancellationToken)
+    {
+        EnsureConfigured();
+        using var json = await SendAsync(HttpMethod.Get, $"subscriptions/{Uri.EscapeDataString(subscriptionId)}", null, cancellationToken);
+        return ReadSubscription(json.RootElement);
+    }
+
+    public enum WebhookOutcome { Processed, Duplicate, Ignored, InvalidSignature, NotConfigured }
+
+    public async Task<WebhookOutcome> ProcessWebhookAsync(string payload, string signatureHeader, CancellationToken cancellationToken)
+    {
+        if (!options.StripeConfigured) return WebhookOutcome.NotConfigured;
+        if (!VerifySignature(payload, signatureHeader))
         {
-            logger.LogWarning("Rejected Stripe webhook with invalid signature");
-            return false;
+            logger.LogWarning("Rejected a Stripe webhook with an invalid signature");
+            return WebhookOutcome.InvalidSignature;
         }
 
         using var document = JsonDocument.Parse(payload);
         var root = document.RootElement;
+        var eventId = GetString(root, "id");
         var type = GetString(root, "type");
-        if (string.IsNullOrWhiteSpace(type) ||
-            !root.TryGetProperty("data", out var data) ||
-            !data.TryGetProperty("object", out var obj))
-            return true;
+        if (string.IsNullOrWhiteSpace(eventId) || string.IsNullOrWhiteSpace(type) ||
+            !root.TryGetProperty("data", out var data) || !data.TryGetProperty("object", out var obj))
+            return WebhookOutcome.Ignored;
+        var created = root.TryGetProperty("created", out var c) && c.TryGetInt64(out var epoch)
+            ? DateTimeOffset.FromUnixTimeSeconds(epoch)
+            : clock.GetUtcNow();
 
-        switch (type)
+        if (!await store.TryRecordStripeEventAsync(eventId, type, created, clock.GetUtcNow(), cancellationToken))
+            return WebhookOutcome.Duplicate;
+
+        try
         {
-            case "checkout.session.completed":
-                await HandleCheckoutAsync(obj, cancellationToken);
-                break;
-            case "customer.subscription.created":
-            case "customer.subscription.updated":
-            case "customer.subscription.deleted":
-                await HandleSubscriptionAsync(obj, cancellationToken);
-                break;
-            case "invoice.payment_failed":
-                await HandlePaymentFailedAsync(obj, cancellationToken);
-                break;
+            var handled = type switch
+            {
+                "checkout.session.completed" => await HandleCheckoutAsync(obj, cancellationToken),
+                "customer.subscription.created" or "customer.subscription.updated" or "customer.subscription.deleted"
+                    or "customer.subscription.paused" or "customer.subscription.resumed"
+                    => await RefreshAsync(GetString(obj, "id"), IdOrString(obj, "customer"), MetadataUser(obj), cancellationToken),
+                // Payment failure (Stripe moves the subscription to past_due) and restored payment (back to active).
+                "invoice.payment_failed" or "invoice.paid" or "invoice.payment_succeeded"
+                    => await RefreshAsync(InvoiceSubscription(obj), IdOrString(obj, "customer"), null, cancellationToken),
+                _ => false,
+            };
+            return handled ? WebhookOutcome.Processed : WebhookOutcome.Ignored;
+        }
+        catch
+        {
+            // Let Stripe's retry through instead of treating the failed attempt as done.
+            await store.ForgetStripeEventAsync(eventId, CancellationToken.None);
+            throw;
+        }
+    }
+
+    private async Task<bool> HandleCheckoutAsync(JsonElement session, CancellationToken cancellationToken)
+    {
+        if (!Guid.TryParse(GetString(session, "client_reference_id") ?? Metadata(session, "user_id"), out var userId)) return false;
+        return await RefreshAsync(IdOrString(session, "subscription"), IdOrString(session, "customer"), userId, cancellationToken);
+    }
+
+    /// <summary>Re-reads the subscription from Stripe and stores its current state for the user it belongs to.</summary>
+    private async Task<bool> RefreshAsync(string? subscriptionId, string? customerId, Guid? knownUser, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(subscriptionId)) return false;
+        var subscription = await GetSubscriptionAsync(subscriptionId, cancellationToken);
+        var userId = knownUser ?? subscription.UserId
+            ?? await store.FindUserByExternalAsync(subscription.CustomerId ?? customerId, subscription.Id, cancellationToken);
+        if (userId is null)
+        {
+            logger.LogWarning("Stripe subscription {Subscription} doesn't belong to a known account", subscription.Id);
+            return false;
         }
 
+        var now = clock.GetUtcNow();
+        await store.UpsertSubscriptionAsync(
+            userId.Value, subscription.CustomerId ?? customerId, subscription.Id, subscription.Plan ?? "", subscription.Status,
+            subscription.CurrentPeriodEnd, subscription.CancelAtPeriodEnd, now, cancellationToken, stateAt: now);
         return true;
     }
 
-    private async Task HandleCheckoutAsync(JsonElement obj, CancellationToken cancellationToken)
+    private StripeSubscription ReadSubscription(JsonElement obj)
     {
-        var userText = GetString(obj, "client_reference_id") ?? Metadata(obj, "user_id");
-        if (!Guid.TryParse(userText, out var userId)) return;
-
-        var customer = IdOrString(obj, "customer");
-        var subscription = IdOrString(obj, "subscription");
-        var plan = Metadata(obj, "plan") ?? "monthly";
-        var email = obj.TryGetProperty("customer_details", out var details) ? GetString(details, "email") : null;
-
-        await store.SetEmailAsync(userId, email, cancellationToken);
-        await store.UpsertSubscriptionAsync(
-            userId, customer, subscription, plan, "active", null, false, clock.GetUtcNow(), cancellationToken);
-    }
-
-    private async Task HandleSubscriptionAsync(JsonElement obj, CancellationToken cancellationToken)
-    {
-        var subscriptionId = GetString(obj, "id");
-        var customerId = IdOrString(obj, "customer");
-        var userText = Metadata(obj, "user_id");
-        Guid? userId = Guid.TryParse(userText, out var parsed) ? parsed : null;
-        userId ??= await store.FindUserByExternalAsync(customerId, subscriptionId, cancellationToken);
-        if (userId is null) return;
-
-        var status = GetString(obj, "status") ?? "inactive";
-        var plan = Metadata(obj, "plan") ?? "";
-        var cancelAtEnd = obj.TryGetProperty("cancel_at_period_end", out var cancel) && cancel.ValueKind == JsonValueKind.True;
+        string? priceId = null;
         DateTimeOffset? periodEnd = null;
-        if (obj.TryGetProperty("current_period_end", out var end) && end.TryGetInt64(out var epoch))
-            periodEnd = DateTimeOffset.FromUnixTimeSeconds(epoch);
+        if (obj.TryGetProperty("items", out var items) && items.TryGetProperty("data", out var list) && list.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in list.EnumerateArray())
+            {
+                priceId ??= item.TryGetProperty("price", out var price) ? GetString(price, "id") : null;
+                // Current Stripe API versions report the billing period per item.
+                if (periodEnd is null && item.TryGetProperty("current_period_end", out var itemEnd) && itemEnd.TryGetInt64(out var e))
+                    periodEnd = DateTimeOffset.FromUnixTimeSeconds(e);
+            }
+        }
+        if (periodEnd is null && obj.TryGetProperty("current_period_end", out var end) && end.TryGetInt64(out var legacy))
+            periodEnd = DateTimeOffset.FromUnixTimeSeconds(legacy);
 
-        await store.UpsertSubscriptionAsync(
-            userId.Value, customerId, subscriptionId, plan, status, periodEnd, cancelAtEnd, clock.GetUtcNow(), cancellationToken);
+        return new StripeSubscription(
+            GetString(obj, "id") ?? "",
+            IdOrString(obj, "customer"),
+            GetString(obj, "status") ?? "incomplete",
+            options.PlanForPrice(priceId),
+            periodEnd,
+            obj.TryGetProperty("cancel_at_period_end", out var cancel) && cancel.ValueKind == JsonValueKind.True,
+            MetadataUser(obj));
     }
 
-    private async Task HandlePaymentFailedAsync(JsonElement obj, CancellationToken cancellationToken)
+    private async Task<JsonDocument> SendAsync(HttpMethod method, string path, Dictionary<string, string>? fields, CancellationToken cancellationToken)
     {
-        var customerId = IdOrString(obj, "customer");
-        var subscriptionId = IdOrString(obj, "subscription");
-        var userId = await store.FindUserByExternalAsync(customerId, subscriptionId, cancellationToken);
-        if (userId is null) return;
-
-        var existing = await store.GetSubscriptionAsync(userId.Value, cancellationToken);
-        await store.UpsertSubscriptionAsync(
-            userId.Value,
-            customerId,
-            subscriptionId,
-            existing?.Plan ?? "",
-            "past_due",
-            existing?.CurrentPeriodEnd,
-            existing?.CancelAtPeriodEnd ?? false,
-            clock.GetUtcNow(),
-            cancellationToken);
+        using var request = new HttpRequestMessage(method, Api + path);
+        if (fields is not null) request.Content = new FormUrlEncodedContent(fields);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", options.StripeSecretKey);
+        using var response = await http.SendAsync(request, cancellationToken);
+        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+        // Never log Stripe's response body or the key: just the status.
+        if (!response.IsSuccessStatusCode) throw new HttpRequestException($"Stripe {method} {path.Split('/')[0]} failed ({(int)response.StatusCode}).");
+        return JsonDocument.Parse(body);
     }
 
-    private bool VerifySignature(string payload, string header)
+    public bool VerifySignature(string payload, string header)
     {
         if (string.IsNullOrWhiteSpace(header) || string.IsNullOrWhiteSpace(options.StripeWebhookSecret)) return false;
 
@@ -206,11 +217,7 @@ public sealed class StripeBillingService(
         if (timestamp is null || signatures.Count == 0) return false;
         if (Math.Abs(clock.GetUtcNow().ToUnixTimeSeconds() - timestamp.Value) > 300) return false;
 
-        var signed = Encoding.UTF8.GetBytes($"{timestamp.Value}.{payload}");
-        var key = Encoding.UTF8.GetBytes(options.StripeWebhookSecret);
-        using var hmac = new HMACSHA256(key);
-        var expected = hmac.ComputeHash(signed);
-
+        var expected = Sign(payload, timestamp.Value, options.StripeWebhookSecret);
         foreach (var candidate in signatures)
         {
             try
@@ -223,21 +230,37 @@ public sealed class StripeBillingService(
                 // Ignore malformed signatures.
             }
         }
-
         return false;
+    }
+
+    /// <summary>Stripe's v1 signature: HMAC-SHA256 of "{timestamp}.{payload}" with the endpoint secret.</summary>
+    public static byte[] Sign(string payload, long timestamp, string secret)
+    {
+        using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secret));
+        return hmac.ComputeHash(Encoding.UTF8.GetBytes($"{timestamp}.{payload}"));
     }
 
     private void EnsureConfigured()
     {
-        if (!options.StripeConfigured)
-            throw new InvalidOperationException("Stripe billing is not configured.");
+        if (!options.StripeConfigured) throw new InvalidOperationException("Stripe billing is not configured.");
     }
+
+    private static string? InvoiceSubscription(JsonElement invoice)
+    {
+        if (IdOrString(invoice, "subscription") is { } direct) return direct;
+        // Newer API versions nest it under parent.subscription_details.
+        return invoice.TryGetProperty("parent", out var parent) && parent.TryGetProperty("subscription_details", out var details)
+            ? IdOrString(details, "subscription")
+            : null;
+    }
+
+    private static Guid? MetadataUser(JsonElement obj) => Guid.TryParse(Metadata(obj, "user_id"), out var id) ? id : null;
 
     private static string? GetString(JsonElement element, string name) =>
         element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
 
     private static string? Metadata(JsonElement element, string key) =>
-        element.TryGetProperty("metadata", out var metadata) ? GetString(metadata, key) : null;
+        element.TryGetProperty("metadata", out var metadata) && metadata.ValueKind == JsonValueKind.Object ? GetString(metadata, key) : null;
 
     private static string? IdOrString(JsonElement element, string name)
     {
