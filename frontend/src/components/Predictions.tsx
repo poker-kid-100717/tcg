@@ -10,6 +10,8 @@ export function statusMessage(status: PredictionStatus): string {
       return "The latest model didn't beat predicting \"no change\" on recent weeks it hadn't seen, so its predictions are hidden.";
     case 'Published':
       return 'No predictions in this direction right now.';
+    case 'Preview':
+      return 'No strong early market signal in this direction right now.';
     default:
       return 'Predictions start once there is enough price history to train the model and test it on weeks it hasn’t seen.';
   }
@@ -67,7 +69,7 @@ export function CardOutlook({ list }: { list: PredictionList }) {
 }
 
 /** Predicted risers or fallers, each linking to its card. */
-export function PredictionTable({ cards, empty }: { cards: CardPrediction[]; empty: string }) {
+export function PredictionTable({ cards, empty, status }: { cards: CardPrediction[]; empty: string; status: PredictionStatus }) {
   if (cards.length === 0) return <p className="px-4 py-6 text-sm text-slate-500">{empty}</p>;
   return (
     <ol className="divide-y divide-slate-100">
@@ -88,11 +90,13 @@ export function PredictionTable({ cards, empty }: { cards: CardPrediction[]; emp
                 {p.reasons[0] && <span className="block truncate text-xs text-slate-500">{p.reasons[0].text}</span>}
               </span>
               <span className="shrink-0 whitespace-nowrap text-right">
-                <span className="price block text-slate-900">{formatPrice(p.predicted)}</span>
+                <span className="price block text-slate-900">{formatPrice(status === 'Preview' ? p.current : p.predicted)}</span>
                 <span className="block text-xs">
                   <ChangeBadge change={p.changePercent} />
                   <span className="text-slate-400 sm:hidden"> </span>
-                  <span className="block text-slate-400 sm:inline"> from {formatPrice(p.current)}</span>
+                  <span className="block text-slate-400 sm:inline">
+                    {status === 'Preview' ? ' early signal' : ` from ${formatPrice(p.current)}`}
+                  </span>
                 </span>
               </span>
             </span>

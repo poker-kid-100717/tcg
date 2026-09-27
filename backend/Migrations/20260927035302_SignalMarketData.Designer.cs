@@ -12,8 +12,8 @@ using PokemonTCG.API.Data;
 namespace PokemonTCG.API.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20260926132940_ProviderResults")]
-    partial class ProviderResults
+    [Migration("20260927035302_SignalMarketData")]
+    partial class SignalMarketData
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)

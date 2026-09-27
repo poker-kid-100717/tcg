@@ -75,6 +75,11 @@ namespace PokemonTCG.API.Data
         Running,
         /// <summary>Trained, validated and beat the no-change baseline, so its predictions are shown.</summary>
         Published,
+        /// <summary>
+        /// Immediate, unvalidated signal built from the latest market-versus-listing pressure while the
+        /// trained model is still collecting enough daily history.
+        /// </summary>
+        Preview,
         /// <summary>Trained but didn't beat the no-change baseline on held-out data, so nothing is shown.</summary>
         Withheld,
         /// <summary>Not enough price history to train and validate yet.</summary>
@@ -137,9 +142,9 @@ namespace PokemonTCG.API.Data
     }
 
     /// <summary>
-    /// The catalog and price history, predictions, market signals and comps, and TCG Signal accounts (users,
-    /// subscriptions, watchlists, alerts). Each area configures its tables in its own partial file. Data Protection keeps
-    /// its keys here so sign-ins survive container restarts.
+    /// The catalog and price history, predictions, market signals and comps. Each area configures its tables in its own
+    /// partial file. TCG Signal's account tables are managed with SQL migrations and read through ProductStore. Data
+    /// Protection keeps its keys here so sign-ins survive container restarts.
     /// </summary>
     public partial class AppDbContext : DbContext, IDataProtectionKeyContext
     {

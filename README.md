@@ -1,221 +1,1122 @@
-# Pokémon TCG Price Guide
+# TCG Signal
 
 [![CI](https://github.com/poker-kid-100717/tcg/actions/workflows/ci.yml/badge.svg)](https://github.com/poker-kid-100717/tcg/actions/workflows/ci.yml)
 
-**Live: [tcg-portfolio-sample.app](https://tcg-portfolio-sample.app)**
+**Production:** https://tcg-portfolio-sample.app
 
-A price guide and set guide for the Pokémon Trading Card Game. It shows the TCGplayer market price of every card in
-every set, records prices daily to build a price history and a list of the week's biggest movers, and links each card
-to its TCGplayer listing with a **Shop now** button. It doesn't sell anything itself.
+TCG Signal is a cloud-hosted Pokémon TCG market-intelligence and collector platform. The application combines a React client, a .NET 10 core API, an independently deployable inventory service, PostgreSQL persistence, Cloudflare edge routing, scheduled price collection, model validation, optional billing, and optional AI-assisted collection guidance.
 
-- **Sets:** every set, grouped by series. Each set page lists every card with its market price, the set's total
-  market value and most valuable card, with sorting (collector number, price, name), a rarity filter and a
-  find-in-set box. Sort and rarity are kept in the URL, so a filtered view can be shared.
-- **Cards:** the TCGplayer market, low, mid and high price for each printing (holofoil, reverse holo, first
-  edition…), a price-history chart built from the daily snapshots, the card's details, and **Shop now on
-  TCGplayer**.
-- **Market:** the biggest gains and drops over 24 hours, 7 days or 30 days, the most valuable cards right now, and two
-  signals:
-  - **Trending down:** cards in a steady decline over 30 days (not one bad day), each with a sparkline.
-  - **Sleepers:** quiet cards with nothing listed near what they sell for. The cheapest TCGplayer listing is 10%+ above
-    the market price while the market price has barely moved, which often comes before the price catches up.
-- **Outlook:** a machine-learning forecast of every card's price 30 days out, with a likely range and the factors
-  behind it, plus how well the model has done: its error against "no change" on held-out weeks, what it relies on,
-  and a track record of past predictions checked against real prices. Each card page shows its own outlook.
-- **Search:** by card name, newest sets first.
+This README is the architectural source of truth for the repository. It describes the runtime boundaries, data ownership, request flows, operational model, security controls, design tradeoffs, and known scaling limits.
 
-## Stack
+---
 
-| Layer | Technology |
-|---|---|
-| Frontend | React 19, TypeScript, Vite, TanStack Query, React Router 7, Tailwind CSS, Chart.js |
-| API | ASP.NET Core 10 minimal APIs, EF Core 10 on PostgreSQL (Npgsql), HybridCache, `Microsoft.Extensions.Http.Resilience` |
-| ML | ML.NET 5 FastTree (gradient-boosted regression trees) with per-prediction feature contributions |
-| Data | [Pokémon TCG API](https://docs.pokemontcg.io) for cards, sets and TCGplayer prices; Postgres (Neon) for the daily price snapshots |
-| Hosting | Cloudflare Worker (static site, routing, Cron Trigger) and a Cloudflare Container running the API |
-| Tests | xUnit + Testcontainers (real Postgres), Vitest + Testing Library, Worker routing tests |
+## 1. Architecture goals
 
-## Architecture
+The design is intentionally optimized around five principles.
 
-```
-Browser ──► Cloudflare Worker (worker/index.ts)
-              ├── /*                 → React build (static assets, SPA fallback)
-              └── /api/*, /health    → Cloudflare Container: ASP.NET Core 10 API ──┬──► Pokémon TCG API (cards, sets, prices)
-                                                                                    └──► Neon Postgres (price snapshots)
-Cron Trigger (11:15 UTC) ──► Worker.scheduled ──► POST /internal/snapshots on the container
-Cron Trigger (11:45 UTC) ──► Worker.scheduled ──► POST /internal/predictions (retrain, validate, predict, score past runs)
-```
+1. **Trustworthy data over broad claims.**  
+   Missing, stale, or unverified information is represented explicitly instead of being inferred.
 
-```
-backend/
-  Pricing/
-    PokemonTcgClient.cs      Typed HttpClient for the Pokémon TCG API: paging, query building and escaping
-    PriceGuideService.cs     Read side: sets, set detail, card history, search, movers, top cards, down-trend, sleepers
-    PriceSnapshotService.cs  Daily job: records every card's TCGplayer prices with bulk upserts
-    PriceGuideEndpoints.cs   Minimal API endpoints, plus the 502 handler for upstream outages
-    Predictions/
-      PriceFeatures.cs       The 27 model inputs, group premiums, and a plain-English line for each
-      PriceModel.cs          ML.NET FastTree training, prediction and feature contributions
-      PredictionService.cs   Daily job: feature query, time-split validation, publish rule, track record
-      PredictionEndpoints.cs Outlook, per-card and model-summary endpoints
-  Data/                      EF Core model and migrations, startup migration with retry, readiness middleware
-frontend/src/
-  api/                       Typed API client and TanStack Query hooks
-  pages/                     Home, Sets, Set, Card, Search, Market, Outlook, How it works
-  components/                Layout, card tile, Shop link, price history chart, movers table, sparkline, market signals
-worker/index.ts              Routing, container binding, daily Cron Trigger
+2. **Separate workloads that fail differently.**  
+   Retail inventory is isolated from pricing and collector workflows because retailer APIs, release-day traffic, and stock volatility have different operational characteristics.
+
+3. **Keep the edge thin but useful.**  
+   Cloudflare terminates TLS, serves the SPA, enforces selected entitlements, routes traffic, runs scheduled jobs, and hosts the AI orchestration boundary. Domain logic remains in the .NET services.
+
+4. **Persist state outside containers.**  
+   Both application containers are disposable. PostgreSQL owns durable state.
+
+5. **Make model output earn the right to be shown.**  
+   Forecasts are published only when the trained model beats a no-change baseline on held-out data.
+
+---
+
+## 2. System context
+
+```mermaid
+flowchart LR
+    U[Collector Browser]
+
+    CF[Cloudflare Worker<br/>Edge Gateway]
+    WEB[React 19 SPA<br/>Vite / TypeScript]
+    CORE[TCG Signal Core API<br/>ASP.NET Core 10]
+    INV[Inventory.Service<br/>ASP.NET Core 10]
+    DB[(PostgreSQL / Neon)]
+    AI[Cloudflare Workers AI]
+    TCG[Pokémon TCG API]
+    SCRY[Scrydex]
+    STRIPE[Stripe]
+    BB[Best Buy Provider]
+
+    U -->|HTTPS| CF
+    CF -->|Static assets| WEB
+    CF -->|Core API traffic| CORE
+    CF -->|Entitled inventory traffic| INV
+    CF -->|Grounded advisor prompt| AI
+
+    CORE --> DB
+    INV --> DB
+
+    CORE --> TCG
+    CORE --> SCRY
+    CORE --> STRIPE
+    INV --> BB
 ```
 
-### API
+### Runtime responsibility summary
 
-| Method | Route | Returns |
+| Boundary | Responsibility | Explicitly does not own |
 |---|---|---|
-| `GET` | `/api/sets` | Every set, newest first |
-| `GET` | `/api/sets/{id}` | The set, its stats (total market value, most valuable card) and every card with its price |
-| `GET` | `/api/cards/{id}` | Card details, prices by printing, TCGplayer link and up to a year of daily price history |
-| `GET` | `/api/cards?q=&page=` | Cards whose name starts with `q` |
-| `GET` | `/api/market/movers?days=7` | Biggest gains and drops between the latest snapshot and the one `days` earlier |
-| `GET` | `/api/market/top` | Most valuable cards in the latest snapshot |
-| `GET` | `/api/market/downtrend?days=30` | Cards falling steadily over the window, with their daily prices |
-| `GET` | `/api/market/sleepers` | Cards whose cheapest listing is well above their market price while the price stays flat |
-| `GET` | `/api/predictions?direction=up` | Cards the model predicts will rise (or `down`), with range and reasons |
-| `GET` | `/api/cards/{id}/predictions` | The card's prediction for each printing |
-| `GET` | `/api/predictions/model` | The current model: status, held-out error vs "no change", feature importance, track record |
-| `GET` | `/api/market/status` | When prices were last recorded and how many days of history exist |
-| `GET` | `/health`, `/health/live` | Readiness (database and migrations) and liveness |
-| `POST` | `/internal/snapshots` | Runs the price snapshot. Called by the Cron Trigger; the Worker never forwards `/internal` from the internet |
-| `POST` | `/internal/predictions` | Retrains the model and refreshes predictions. Called by the second Cron Trigger |
+| React SPA | User experience, client routing, query state, presentation | Secrets, authorization decisions, persistence |
+| Cloudflare Worker | TLS edge, static assets, API routing, Store Finder entitlement gate, Workers AI orchestration, cron dispatch | Core business rules, durable application state |
+| Core API | Pricing, market intelligence, sessions, subscriptions, watchlists, alerts, master sets, predictions | Retail inventory provider behavior |
+| Inventory.Service | Retailer adapters, evidence rules, distance filtering, provider health, short-lived observations | User identity, billing state, market pricing |
+| PostgreSQL | Durable application state | Compute |
+| External providers | Catalog, market enrichment, billing, retailer inventory | TCG Signal authorization or product policy |
 
-### Design decisions
+---
 
-- **Link out to TCGplayer instead of a cart and checkout.** TCGplayer already has the inventory, sellers and
-  checkout. Each card's Shop now button opens its TCGplayer listing (the Pokémon TCG API's
-  `prices.pokemontcg.io/tcgplayer/{id}` link, which redirects to the product page).
-- **Card data goes through the API.** The Pokémon TCG API key stays on the server; HybridCache keeps popular sets
-  and cards from being refetched for every visitor; the resilience handler retries transient failures with
-  timeouts sized for 250-card pages; and an upstream outage returns a clear `502` instead of a `500`.
-- **Daily snapshots on a Cron Trigger.** The container sleeps after 10 minutes idle, so an in-process timer
-  wouldn't fire reliably. The Worker's `scheduled` handler wakes the container once a day and calls
-  `/internal/snapshots`. A second trigger while a run is in progress gets `409`.
-- **Bulk upserts with Postgres `unnest`, in one transaction.** A run pages through every card, 250 at a time, and
-  writes each page with one `INSERT … SELECT FROM unnest(…) ON CONFLICT DO UPDATE` per table, all inside one
-  transaction, so a failed run leaves nothing half-written. The whole day is a few dozen
-  statements, and rerunning a day overwrites that day's rows instead of duplicating them.
-- **Only meaningful prices are kept.** Printings under $0.50 (`Snapshots:MinMarketPrice`) aren't recorded, and
-  snapshots older than 400 days are deleted after each run, which keeps the table inside a free Neon database.
-  Movers ignore prices under $2, so a few cents on a common doesn't top the list, and each card appears once
-  (its biggest move).
-- **Trends are fitted in Postgres, not eyeballed from two dates.** Trending down runs a least-squares fit over each
-  printing's daily prices with `regr_slope` and `regr_r2` in one SQL query. A card qualifies only if the line slopes
-  down, fits well (r² ≥ 0.6, so a single spike or dip doesn't count), has at least 5 days of prices and dropped 10% or
-  more. Sleepers compare the cheapest listing (TCGplayer *low*) with the market price (recent sales), ignore gaps over
-  3× as likely bad data, and require the market price to be within 15% of 30 days ago. The page states both rules and
-  that they're signals, not financial advice.
-- **Predictions from a trained, tested model, not a guess.**
-  - **Target:** the log of each printing's price ratio 30 days ahead, predicted by gradient-boosted regression
-    trees (ML.NET FastTree). Trees handle features on mixed scales and their interactions (a 1st Edition holo from
-    1999 behaves nothing like last month's reverse holo), and they can say how much each feature moved one prediction.
-  - **Features (27):** price level; 7, 30 and 90-day change; volatility; the 30-day trend and how steady it is; the
-    cheapest, median and highest listing against the market price; set age, size and era; secret rare; rank and
-    share of value in its set; rarity, Pokémon and artist premiums (how their cards sell against the typical card
-    that day, shrunk toward zero for small groups); how many cards feature the Pokémon; Trainer, Energy and rule-box
-    flags; and the printing. Pokémon popularity is measured from prices, so it updates itself.
-  - **Validation without leakage:** samples are taken weekly. A sample's outcome is its first price in the 5 days
-    from the horizon date. A date counts as labelled only once its whole outcome window has passed. The most recent 20% of labelled dates are held out, and training uses only
-    dates whose whole outcome window closed before that period started. Features use only what was known on the
-    sample date: a Pokémon's printings are counted from set release dates up to then, and validation error is
-    measured on real (unclipped) returns.
-  - **Only complete days:** a snapshot run is one database transaction, so a run that fails part-way records
-    nothing, and the prediction run is skipped while a snapshot is running or after one failed; the previous
-    predictions stay up. Rarity, Pokémon and artist premiums are computed in SQL over every priced printing that
-    day, before any sampling. Each printing is predicted from its most recent price in the last week.
-  - **Bounded memory:** rows are capped per sample date inside the SQL query (a stable pseudo-random subset, taken
-    after set ranks are computed on the full day), so the container never loads more than
-    `Predictions:MaxTrainingRows` labelled rows. The latest day is never capped.
-  - **Publish rule:** the model has to beat predicting "no change" on the held-out weeks by at least 2%, or its
-    predictions are withheld and the page says why. Each prediction's range comes from the 10th and 90th
-    percentile of held-out errors.
-  - **Track record:** one run a week keeps its predictions (with its own horizon, so rows stay correct if the
-    horizon setting changes). Once their 30 days plus the 5-day outcome window are
-    up, the next run scores them against actual prices and drops the rows. Other runs' rows are dropped once a newer run publishes, which keeps
-    the table small.
-  - **Cold start:** training and testing a 30-day model needs about 74 days of prices; until then the Outlook page
-    says how many days it has.
-- **Readiness that tells the truth.** `/health` fails until migrations have applied, requests wait for database
-  initialization after a cold start, and startup retries the migration with backoff if Neon is still waking.
+## 3. Deployment topology
 
-## Running locally
+Production is a single Cloudflare Worker with two Cloudflare Container applications behind it.
 
-Requires the .NET 10 SDK, Node 22.12+ and Docker.
+```mermaid
+flowchart TB
+    DNS[tcg-portfolio-sample.app]
+    W[Cloudflare Worker<br/>tcg]
 
-```bash
-docker compose up -d                              # Postgres 17 on localhost:5432
-dotnet run --project backend                      # API on http://localhost:5259 (Swagger at /swagger)
-curl -X POST http://localhost:5259/internal/snapshots   # record today's prices (takes a minute or two)
+    A[Static frontend assets<br/>frontend/dist]
+    C1[Container: TcgApi<br/>max_instances: 1<br/>sleep_after: 10m]
+    C2[Container: InventoryApi<br/>max_instances: 1<br/>sleep_after: 10m]
 
-cd frontend && npm ci && npm run dev              # http://localhost:3000, proxies /api to the API
+    D1[Durable Object binding: API]
+    D2[Durable Object binding: INVENTORY]
+
+    DB[(Neon PostgreSQL)]
+
+    DNS --> W
+    W --> A
+    W --> D1 --> C1 --> DB
+    W --> D2 --> C2 --> DB
 ```
 
-Optionally set `PokemonTcgApi__ApiKey` (free from [dev.pokemontcg.io](https://dev.pokemontcg.io)) for a higher
-rate limit. Price history and movers need at least two snapshots on different days.
+### Current scaling posture
 
-## Deployment
+This is an MVP/early-product topology, not a claim of unlimited scale.
 
-On push to `main`, `.github/workflows/deploy-cloudflare.yml` builds the frontend, runs `wrangler deploy` (which
-builds and pushes the API container image), uploads the Worker secrets, and smoke-tests the production domain:
-`/health`, a page, `/api/sets` and `/api/market/status`. `ci.yml` runs every test suite and the EF migration
-drift check on pull requests and pushes.
+- Core API is configured with one container instance.
+- Inventory API is configured with one container instance.
+- Containers sleep after inactivity and cold-start on demand.
+- Static assets are served at the Cloudflare edge.
+- Durable Object names provide stable routing to the container applications.
+- PostgreSQL is the shared durable dependency.
+- Inventory is a separate service boundary so it can scale independently later without rewriting the core product.
 
-| GitHub secret | Value |
+A future high-volume deployment can increase inventory capacity, separate databases, and introduce provider-specific queues without changing the public client contract.
+
+---
+
+## 4. Request routing and trust boundaries
+
+The Worker is the only public ingress for production API traffic.
+
+### Public routing policy
+
+The Worker forwards:
+
+- `/api/*`
+- `/health`
+- `/health/*`
+
+It does **not** expose `/internal/*`.
+
+All non-API requests are served from the React SPA asset binding.
+
+### Forwarded headers
+
+Cloudflare terminates HTTPS. The Worker forwards:
+
+- `X-Forwarded-Proto`
+- `X-Forwarded-For` when Cloudflare provides a client IP
+
+The .NET Core API trusts these headers because the container is not directly exposed as a public internet endpoint.
+
+---
+
+## 5. Core request flows
+
+### 5.1 Standard market-data request
+
+```mermaid
+sequenceDiagram
+    participant B as Browser
+    participant W as Cloudflare Worker
+    participant A as Core API
+    participant D as PostgreSQL
+    participant P as External Market Provider
+
+    B->>W: GET /api/cards/{id}
+    W->>A: Forward request
+    A->>D: Read local card / snapshot state
+    alt local data requires provider lookup
+        A->>P: Request catalog / market data
+        P-->>A: Provider response
+    end
+    A-->>W: JSON response
+    W-->>B: JSON response
+```
+
+### 5.2 Store Finder request
+
+Inventory is authorization-gated before precise coordinates are forwarded to the inventory service.
+
+```mermaid
+sequenceDiagram
+    participant B as Browser
+    participant W as Cloudflare Worker
+    participant C as Core API
+    participant I as Inventory.Service
+    participant R as Retailer Provider
+    participant D as PostgreSQL
+
+    B->>W: POST /api/inventory/nearby<br/>lat, lng, radius
+    W->>C: POST /api/session
+    C->>D: Resolve device user + entitlement
+    D-->>C: Account state
+    C-->>W: hasStoreFinder
+
+    alt not entitled
+        W-->>B: 403 Store Finder required
+    else entitled
+        W->>I: Forward inventory request
+        I->>R: Provider-specific search
+        R-->>I: Store-level evidence
+        I->>D: Persist provider run + observations
+        I-->>W: Verified nearby listings + provider coverage
+        W-->>B: Response
+    end
+```
+
+**Privacy invariant:** user latitude and longitude are not persisted. Inventory.Service stores public store coordinates and retailer observations only.
+
+### 5.3 Master Set AI Advisor
+
+The AI boundary is deliberately grounded.
+
+1. Browser requests `POST /api/master-sets/{id}/advisor`.
+2. Worker requests server-generated advisor context from the Core API.
+3. Core API returns only user-scoped collection and market facts.
+4. Worker sends that structured context to Cloudflare Workers AI.
+5. If inference is unavailable or fails, the Worker returns a deterministic Core-generated recommendation.
+
+The model is not trusted to invent prices, sales, scarcity, inventory, or user holdings.
+
+---
+
+## 6. Service boundaries
+
+### 6.1 Frontend
+
+**Path:** `frontend/`
+
+**Technology**
+
+- React 19
+- TypeScript
+- Vite
+- React Router
+- TanStack Query
+- Tailwind CSS
+- Chart.js
+- Vitest / Testing Library
+
+**Responsibilities**
+
+- Route-level application shell
+- Card/set discovery
+- Market views
+- Watchlist and alert UX
+- Deal Analyzer
+- Master Set workflows
+- Store Finder UX
+- Subscription presentation
+- Client-side geolocation acquisition
+- Query caching and loading/error states
+
+**Design rule:** the frontend never receives provider credentials, Stripe secrets, database credentials, or authorization authority.
+
+---
+
+### 6.2 Core API
+
+**Path:** `backend/`
+
+**Technology**
+
+- ASP.NET Core 10 minimal APIs
+- EF Core 10
+- Npgsql
+- HybridCache
+- Microsoft.Extensions.Http.Resilience
+- ML.NET / FastTree
+
+The Core API owns the application domains that share collector identity and market state.
+
+#### Pricing domain
+
+**Path:** `backend/Pricing/`
+
+Responsibilities include:
+
+- Set/card catalog access
+- Current pricing
+- Local daily price snapshots
+- Historical card pricing
+- Movers
+- Downtrend signals
+- Supply-gap / sleeper signals
+- Provider abstraction around Pokémon TCG API
+- Prediction training and publication
+
+Key components:
+
+- `PokemonTcgClient`
+- `PriceGuideService`
+- `PriceSnapshotService`
+- `PredictionService`
+
+#### Product domain
+
+**Path:** `backend/Product/`
+
+Responsibilities include:
+
+- Device session identity
+- Backend entitlement calculation
+- Stripe subscription state
+- Watchlists
+- Threshold alerts
+- Dashboard data
+- Market Intelligence
+- Scrydex enrichment
+- Master Set tracking
+- AI advisor context generation
+
+Key components:
+
+- `SessionService`
+- `EntitlementService`
+- `StripeBillingService`
+- `MarketIntelligenceService`
+- `AlertEvaluationService`
+- `MasterSetService`
+- `ProductStore`
+- `MasterSetStore`
+
+---
+
+### 6.3 Inventory.Service
+
+**Path:** `inventory/`
+
+Inventory is intentionally independent from the Core API.
+
+Its workload differs in several ways:
+
+- Inventory changes on a much shorter timescale than price history.
+- Retailer APIs can degrade independently.
+- Release-day traffic may spike abruptly.
+- Provider-specific parsing and contracts change independently.
+- False positives have immediate user cost: a wasted store trip.
+
+#### Internal structure
+
+```text
+inventory/
+├── Application/
+│   ├── IInventoryProvider.cs
+│   └── InventorySearchService.cs
+├── Domain/
+│   └── InventoryModels.cs
+├── Infrastructure/
+│   ├── InventoryStore.cs
+│   └── PostgresConnectionString.cs
+├── Providers/
+│   └── BestBuy/
+├── InventoryOptions.cs
+└── Program.cs
+```
+
+#### Provider abstraction
+
+Each retailer implements:
+
+```csharp
+public interface IInventoryProvider
+{
+    string Retailer { get; }
+    bool IsConfigured { get; }
+
+    Task<ProviderInventoryResult> SearchAsync(
+        InventoryQuery query,
+        CancellationToken cancellationToken);
+}
+```
+
+This creates a clean anti-corruption layer between TCG Signal's inventory contract and retailer-specific APIs.
+
+#### Accuracy contract
+
+Inventory.Service follows a fail-closed policy:
+
+- No store is marked in stock without store-specific provider evidence.
+- Quantity is never invented.
+- Provider failures produce degraded coverage, not stale stock claims.
+- Unconfigured providers are identified explicitly.
+- Low-stock state remains distinct from general availability.
+- A failed adapter cannot take down the pricing API.
+
+Current planned-but-withheld providers are Target, Walmart, and GameStop. They remain non-authoritative until a source meets the same evidence standard.
+
+---
+
+## 7. Persistence and data ownership
+
+Production currently uses one PostgreSQL cluster, but ownership is separated logically by service.
+
+### Core schema
+
+Core schema evolution is managed through EF Core migrations in `backend/Migrations/`.
+
+Primary areas include:
+
+| Data | Owner | Access pattern |
+|---|---|---|
+| Cards / sets metadata | Core API | EF Core |
+| Price snapshots | Core API | EF Core |
+| Snapshot runs | Core API | EF Core |
+| Prediction runs | Core API | EF Core |
+| Price predictions | Core API | EF Core |
+| Device users | Core Product domain | Direct Npgsql |
+| Subscriptions | Core Product domain | Direct Npgsql |
+| Watchlists | Core Product domain | Direct Npgsql |
+| Alert events | Core Product domain | Direct Npgsql |
+| Master sets | Core Product domain | Direct Npgsql |
+| Master-set items | Core Product domain | Direct Npgsql |
+
+The Product domain uses direct Npgsql for targeted SQL and user-scoped queries, while schema creation remains represented in Core EF migrations.
+
+### Inventory schema
+
+Inventory.Service owns:
+
+- `inventory_observations`
+- `inventory_provider_runs`
+
+The service creates its inventory tables and indexes during startup.
+
+Inventory observations are retained for a short operational window; current cleanup removes observations older than 72 hours.
+
+### Database ownership rule
+
+Sharing a PostgreSQL cluster does **not** imply shared write ownership.
+
+- Core API writes Core/Product tables.
+- Inventory.Service writes inventory tables.
+- Cross-service writes are intentionally avoided.
+- A future physical database split should not require changing the public API.
+
+---
+
+## 8. Scheduled data pipeline
+
+Cloudflare Cron Triggers wake the Core API container.
+
+| UTC | Job | Purpose |
+|---|---|---|
+| 11:15 | snapshots | Record current card/variant pricing |
+| 11:45 | predictions | Train/validate model and refresh publishable predictions |
+
+```mermaid
+flowchart LR
+    C1[11:15 UTC Cron] --> S[/internal/snapshots]
+    S --> P[PriceSnapshotService]
+    P --> DB[(PostgreSQL)]
+    P --> A[Evaluate watchlist alerts]
+
+    C2[11:45 UTC Cron] --> M[/internal/predictions]
+    M --> T[PredictionService]
+    T --> V{Beats no-change baseline?}
+    V -->|Yes| PUB[Publish predictions]
+    V -->|No| HOLD[Withhold model output]
+    PUB --> DB
+    HOLD --> DB
+```
+
+The `/internal/*` endpoints are callable only through the Worker scheduled handler and are not part of public routing.
+
+---
+
+## 9. Prediction architecture
+
+The prediction system is intentionally conservative.
+
+### Model
+
+- ML.NET FastTree gradient-boosted regression
+- Feature engineering across card, set, price history, ranking, trend, volatility, and premium features
+- Time-separated training and validation
+- 30-day forecast horizon by default
+
+### Publication gate
+
+A model run is published only when its validation MAE improves on a no-change baseline by the configured minimum.
+
+Possible run states include:
+
+- `Running`
+- `Published`
+- `Preview`
+- `Withheld`
+- `InsufficientHistory`
+- `Skipped`
+- `Failed`
+
+### Why the gate exists
+
+A price model that cannot outperform "the price stays the same" should not be presented as intelligence.
+
+The application therefore separates:
+
+- model execution,
+- model validation,
+- model publication,
+- later realized performance scoring.
+
+This makes model quality observable instead of treating every successful training run as product-worthy.
+
+---
+
+## 10. Market Intelligence
+
+Market Intelligence combines local historical state with optional enrichment.
+
+The service can expose:
+
+- current market reference
+- 7-day / 30-day change
+- volatility
+- freshness
+- provenance
+- confidence score and band
+- deterministic explanation
+- sold comps when an enrichment provider is configured
+- liquidity state when supported by evidence
+
+### Confidence philosophy
+
+Confidence is deterministic and explainable. It is not an LLM-generated score.
+
+Unknown provider data stays unknown. The application does not infer transaction volume or liquidity from unrelated fields.
+
+---
+
+## 11. External provider strategy
+
+External integrations are treated as replaceable adapters rather than product-domain primitives.
+
+### Pokémon TCG API
+
+Current compatibility/catalog source for:
+
+- cards
+- sets
+- images
+- TCGplayer-linked price data
+- snapshot ingestion
+
+All access is isolated behind `PokemonTcgClient`.
+
+### Scrydex
+
+Optional market-enrichment provider used by Market Intelligence when configured.
+
+The integration is designed so loss of Scrydex degrades enrichment rather than taking down core price history.
+
+### Stripe
+
+Optional billing provider.
+
+The Core API owns subscription state and derives entitlements server-side. Frontend redirects do not grant access.
+
+### Best Buy
+
+Current implemented Inventory.Service provider adapter.
+
+Inventory.Service consumes the provider through `IInventoryProvider`; retailer-specific behavior does not leak into the client contract.
+
+---
+
+## 12. Identity and authorization
+
+The current identity model is intentionally lightweight.
+
+### Device session
+
+A first-party device session is created using:
+
+- cryptographically random 256-bit token
+- SHA-256 token hash persisted in PostgreSQL
+- HttpOnly cookie
+- Secure cookie over HTTPS
+- SameSite=Lax
+- 180-day expiration
+
+The raw token is never stored in the database.
+
+### Authorization
+
+Collector-owned resources are scoped by resolved user ID.
+
+Examples:
+
+- watchlist mutations
+- alert reads
+- dashboard data
+- master sets
+- subscription state
+
+### Entitlements
+
+Core API calculates:
+
+- Pro access
+- Store Finder access
+- current plan / status
+
+The Worker calls the Core API before forwarding inventory coordinates.
+
+### MVP limitation
+
+Device-bound identity is not a substitute for production multi-device authentication.
+
+The intended evolution is OIDC-based account identity with migration of the existing device profile into the authenticated account.
+
+---
+
+## 13. Billing behavior
+
+Stripe is optional by design.
+
+When required Stripe settings are present:
+
+- Checkout creates a subscription flow.
+- Webhooks update backend subscription state.
+- Customer Portal manages subscription lifecycle.
+- Entitlements are derived from backend state.
+
+Recognized active subscription states include:
+
+- `active`
+- `trialing`
+
+When Stripe is not configured, the application enters **Founding Preview** mode so product workflows remain testable without fake checkout state.
+
+Store Finder and Pro are modeled as separate entitlements; a combined plan can grant both.
+
+---
+
+## 14. Reliability and failure handling
+
+### Core API startup
+
+Core database initialization runs in a background service.
+
+- `/health/live` reports process liveness.
+- `/health` reports readiness, including database state.
+- API requests wait briefly for database initialization.
+- If readiness is not achieved within the configured window, the API returns `503 Service Unavailable` rather than running against a partially initialized schema.
+
+### External HTTP resilience
+
+The Core and Inventory services use `Microsoft.Extensions.Http.Resilience` for provider calls.
+
+Configured behavior includes bounded request timeouts and resilience handling so a slow provider does not indefinitely consume a request.
+
+### Inventory failure semantics
+
+Retailer errors are isolated per provider.
+
+A provider exception results in:
+
+- logged provider failure
+- a provider-run record
+- degraded coverage response
+- zero fabricated listings
+
+### Snapshot / prediction isolation
+
+Predictions do not train against an incomplete current snapshot.
+
+If the latest snapshot is still running or failed, the prediction run is skipped and the previous published predictions remain intact.
+
+---
+
+## 15. Observability
+
+Current operational signals include:
+
+- Cloudflare Worker observability
+- Cloudflare Container logs
+- ASP.NET structured logging
+- `snapshot_runs`
+- `prediction_runs`
+- `inventory_provider_runs`
+- readiness and liveness endpoints
+- deployment smoke tests
+- model validation metrics
+- realized model checkpoints
+
+### Health endpoints
+
+| Endpoint | Meaning |
 |---|---|
-| `CLOUDFLARE_API_TOKEN` | Token with Workers Scripts, Containers and Routes write access |
-| `CLOUDFLARE_ACCOUNT_ID` | Workers & Pages → Account ID |
-| `DATABASE_URL` | Neon connection URL (pasted as-is; the API converts `postgresql://` URLs) |
+| `/health/live` | Process/container liveness |
+| `/health` | Application readiness and database availability |
 
-Optional: `npx wrangler secret put TCG_POKEMONTCG_API_KEY` to give the API a Pokémon TCG API key. The
-`JWT_KEY` secret from the marketplace version is no longer used and can be deleted.
+Production deployment does not complete successfully unless the smoke-test workflow verifies the live site and representative API endpoints.
 
-Upgrading from the marketplace version: the `PriceGuide` migration drops the old users, orders, order items and
-wishlist tables and creates `cards`, `price_snapshots` and `snapshot_runs`.
+---
 
-## Tests
+## 16. Security model
 
-```bash
-dotnet test PokemonTcgMarketplace.sln   # API against a real Postgres (Testcontainers) and a stubbed Pokémon TCG API
-cd frontend && npm test                 # Vitest + Testing Library
-npm ci && npm test                      # Worker routing and the Cron Trigger (repo root)
+### Secret handling
+
+Secrets are injected at deployment time and never bundled into the frontend.
+
+Required production secrets:
+
+| Secret | Purpose |
+|---|---|
+| `CLOUDFLARE_API_TOKEN` | Worker/container deployment |
+| `CLOUDFLARE_ACCOUNT_ID` | Cloudflare account targeting |
+| `DATABASE_URL` | PostgreSQL connection |
+
+Optional provider/billing secrets:
+
+| Secret | Purpose |
+|---|---|
+| `POKEMONTCG_API_KEY` | Pokémon TCG provider credential |
+| `SCRYDEX_API_KEY` | Scrydex credential |
+| `SCRYDEX_TEAM_ID` | Scrydex team |
+| `BESTBUY_API_KEY` | Inventory provider credential |
+| `STRIPE_SECRET_KEY` | Stripe server credential |
+| `STRIPE_WEBHOOK_SECRET` | Stripe webhook verification |
+| `STRIPE_PRO_MONTHLY_PRICE_ID` | Pro monthly plan |
+| `STRIPE_PRO_ANNUAL_PRICE_ID` | Pro annual plan |
+| `STRIPE_STORE_FINDER_MONTHLY_PRICE_ID` | Store Finder plan |
+| `STRIPE_COMPLETE_MONTHLY_PRICE_ID` | Combined plan |
+
+### Security controls
+
+- Provider credentials stay server-side.
+- Stripe webhook signatures are verified server-side.
+- Stripe redirects do not authorize access.
+- Internal scheduled endpoints are not publicly routed.
+- User-owned records are scoped by server-resolved user ID.
+- Precise user geolocation is not persisted by Inventory.Service.
+- Containers are disposable and do not own durable state.
+- Provider failure never authorizes fabricated data.
+
+### Known security follow-up
+
+Before broad consumer launch:
+
+- replace device identity with OIDC
+- add explicit account recovery and multi-device semantics
+- formalize rate limits
+- add abuse controls for high-cost provider/AI endpoints
+- rotate any credential that was ever committed to repository history
+
+---
+
+## 17. Data integrity invariants
+
+These rules are product requirements, not presentation preferences.
+
+- Never fabricate sold counts.
+- Never fabricate liquidity.
+- Never silently substitute one card variant for another.
+- Preserve exact printing identity in watchlists and master sets.
+- Keep source/provenance visible where it materially affects trust.
+- Mark stale information as stale.
+- Withhold ML predictions that fail validation.
+- Do not claim a card will appreciate or sell at the displayed value.
+- Do not mark a store in stock without store-specific evidence.
+- Do not infer inventory quantity when the provider does not supply it.
+- Treat provider failure as coverage degradation, not as cached truth.
+- Do not persist user latitude/longitude in Inventory.Service.
+
+---
+
+## 18. Repository structure
+
+```text
+.
+├── .github/workflows/
+│   ├── ci.yml
+│   └── deploy-cloudflare.yml
+├── backend/
+│   ├── Data/
+│   ├── Migrations/
+│   ├── Pricing/
+│   │   └── Predictions/
+│   ├── Product/
+│   ├── Dockerfile
+│   └── Program.cs
+├── backend.Tests/
+├── frontend/
+│   └── src/
+│       ├── api/
+│       ├── components/
+│       ├── lib/
+│       └── pages/
+├── inventory/
+│   ├── Application/
+│   ├── Domain/
+│   ├── Infrastructure/
+│   ├── Providers/
+│   ├── Dockerfile
+│   └── Program.cs
+├── inventory.Tests/
+├── worker/
+│   └── index.ts
+├── docker-compose.yml
+├── PokemonTcgMarketplace.sln
+└── wrangler.jsonc
 ```
 
-- **API:**
-  - Set detail follows upstream pagination and computes the set's stats.
-  - Search escapes user input, so a quote can't add clauses to the upstream query.
-  - Two snapshot runs a week apart produce price history, movers and top cards, and a same-day rerun doesn't
-    duplicate rows.
-  - Trending down picks a steady decline, but not a noisy one with the same net drop, one with too few prices or
-    one under $2.
-  - Sleepers need a real listing gap, a flat 30 days and a plausible gap; new cards without 30 days of history
-    still count.
-  - Upstream outages return `502`.
-  - Predictions, on 60 days of synthetic history where one Pokémon climbs and another slides: no history gives
-    "insufficient history"; then the model trains, beats "no change" on held-out days, ranks the climbers top and
-    the sliders bottom, keeps each prediction inside its range, explains it, and scores an older checkpoint.
-  - Existing tests cover migrations, readiness and connection-string parsing.
-- **Frontend:**
-  - The card page shows every printing and a Shop now link to the card's TCGplayer listing, and handles 404s and
-    outages.
-  - The set page sorts (unpriced cards last), filters by rarity and finds cards by name or number.
-  - The Outlook page lists predictions with their top reason and the model's results, and explains an empty
-    state; the card page shows each printing's outlook with its reasons.
-  - The Market page shows trending-down cards with their sparklines and sleepers with their listing gap, and
-    explains an empty list while history is short.
-- **Worker:** API paths reach the container, `/internal` never does, and the two Cron Triggers start the snapshot
-  and the prediction run.
+---
 
-## Security notes
+## 19. API surface
 
-- The API has no accounts and stores no personal data; the only secrets are the database URL and the optional
-  Pokémon TCG API key, both Worker secrets passed to the container at start.
-- The container runs as a non-root user and keeps no state.
-- This repository's history (before the cleanup commit) contains a previously committed cloud credentials file and
-  a `.env` with a database connection string. They are gone from the working tree, but still reachable in the git
-  history on GitHub; rotate those credentials.
+Representative routes:
+
+| Method | Route | Owner | Purpose |
+|---|---|---|---|
+| GET | `/api/sets` | Core | Set browser |
+| GET | `/api/sets/{id}` | Core | Set detail |
+| GET | `/api/cards/{id}` | Core | Card detail + price history |
+| GET | `/api/cards?q=` | Core | Search |
+| GET | `/api/cards/{id}/intelligence` | Core | Market Intelligence |
+| GET | `/api/market/movers` | Core | Market movers |
+| GET | `/api/market/downtrend` | Core | Downtrend signal |
+| GET | `/api/market/sleepers` | Core | Supply-gap signal |
+| GET | `/api/predictions` | Core | Published predictions |
+| GET | `/api/predictions/model` | Core | Validation / model status |
+| POST | `/api/session` | Core | Resolve/create device identity |
+| GET/POST | `/api/watchlist` | Core | Watchlist workflows |
+| GET | `/api/alerts` | Core | In-app alerts |
+| GET | `/api/dashboard` | Core | Personalized dashboard |
+| GET/POST | `/api/master-sets` | Core | Master-set workflows |
+| POST | `/api/master-sets/{id}/advisor` | Edge + Core | Grounded AI advisor |
+| POST | `/api/inventory/nearby` | Inventory | Entitled local inventory |
+| POST | `/api/billing/checkout` | Core | Stripe Checkout |
+| POST | `/api/billing/portal` | Core | Stripe Customer Portal |
+| POST | `/api/billing/webhook` | Core | Signed Stripe events |
+| GET | `/health` | Core | Readiness |
+| GET | `/health/live` | Core | Liveness |
+
+The route list is intentionally representative rather than a substitute for endpoint definitions in code.
+
+---
+
+## 20. CI/CD
+
+### Continuous integration
+
+`.github/workflows/ci.yml` runs three independent jobs.
+
+#### Backend
+
+- restore
+- release build
+- .NET tests
+- EF Core pending-model-change check
+
+#### Frontend
+
+- install
+- Vitest
+- TypeScript/Vite production build
+
+#### Worker
+
+- install
+- TypeScript typecheck
+- Worker tests
+
+### Production deployment
+
+`.github/workflows/deploy-cloudflare.yml` runs on pushes to `main`.
+
+Deployment sequence:
+
+1. Install root and frontend dependencies.
+2. Build frontend.
+3. Deploy Worker and both container definitions through Wrangler.
+4. Upload optional provider/billing secrets only when configured.
+5. Smoke-test production:
+   - readiness
+   - SPA routes
+   - set API
+   - market status API
+
+Deployment uses a concurrency group so a newer production deployment cancels an older in-flight deployment.
+
+---
+
+## 21. Local development
+
+### Prerequisites
+
+- .NET 10 SDK
+- Node.js 22.12+
+- Docker
+
+### Start PostgreSQL
+
+```bash
+docker compose up -d
+```
+
+### Start Core API
+
+```bash
+dotnet run --project backend
+```
+
+### Start frontend
+
+```bash
+cd frontend
+npm ci
+npm run dev
+```
+
+### Run the full test suite
+
+```bash
+dotnet test PokemonTcgMarketplace.sln
+cd frontend && npm test && npm run build
+cd ..
+npm test
+npm run typecheck
+```
+
+### Record a local price snapshot
+
+```bash
+curl -X POST http://localhost:5259/internal/snapshots
+```
+
+### Optional Core configuration
+
+Scrydex:
+
+```text
+Scrydex__ApiKey
+Scrydex__TeamId
+```
+
+Stripe:
+
+```text
+Billing__StripeSecretKey
+Billing__StripeWebhookSecret
+Billing__ProMonthlyPriceId
+Billing__ProAnnualPriceId
+Billing__StoreFinderMonthlyPriceId
+Billing__CompleteMonthlyPriceId
+Billing__SiteUrl
+```
+
+Inventory:
+
+```text
+ConnectionStrings__DefaultConnection
+Inventory__BestBuyApiKey
+```
+
+---
+
+## 22. Architectural decisions and rationale
+
+### ADR-001 — Cloudflare Worker as the public gateway
+
+**Decision:** all production traffic enters through the Worker.
+
+**Why**
+
+- one public origin
+- no browser CORS dependency
+- centralized routing
+- static assets at the edge
+- scheduled job dispatch
+- entitlement gate before forwarding precise inventory coordinates
+- AI orchestration without giving the model database access
+
+**Tradeoff**
+
+The Worker becomes an important control plane and must remain intentionally small.
+
+---
+
+### ADR-002 — Inventory as a separate service
+
+**Decision:** retailer inventory is isolated from market pricing.
+
+**Why**
+
+- different traffic profile
+- different failure modes
+- different freshness requirements
+- provider churn
+- independent future scaling
+- false positives carry immediate user cost
+
+**Tradeoff**
+
+The MVP shares a PostgreSQL cluster, so runtime isolation is stronger than infrastructure isolation.
+
+---
+
+### ADR-003 — Shared database cluster, logical ownership
+
+**Decision:** Core and Inventory share PostgreSQL initially but own separate tables.
+
+**Why**
+
+- lower MVP operational cost
+- simpler deployment
+- no distributed transaction requirement
+- service contract already allows a future physical split
+
+**Tradeoff**
+
+Database-level blast radius remains shared until databases are physically separated.
+
+---
+
+### ADR-004 — Device identity before full OIDC
+
+**Decision:** use a secure first-party device token for the MVP.
+
+**Why**
+
+- enables persisted user state immediately
+- avoids custom password authentication
+- supports billing-customer mapping
+- keeps the surface area small
+
+**Tradeoff**
+
+No true multi-device identity, recovery, or account federation yet.
+
+---
+
+### ADR-005 — Fail closed on unverifiable inventory
+
+**Decision:** an inventory provider failure returns no stock claim.
+
+**Why**
+
+The cost of a false positive is greater than the cost of an empty result.
+
+**Tradeoff**
+
+Coverage grows more slowly because a retailer is not added until its source meets the evidence standard.
+
+---
+
+### ADR-006 — Validate ML before publication
+
+**Decision:** a trained model is not automatically a published model.
+
+**Why**
+
+Production ML needs a measurable baseline. If the model cannot beat no-change on held-out history, predictions are withheld.
+
+**Tradeoff**
+
+The Outlook can intentionally show no trained forecast during cold start or weak model periods.
+
+---
+
+## 23. Known constraints / technical debt
+
+These are known architectural limitations rather than accidental omissions.
+
+### Near term
+
+- Pokémon TCG API remains a compatibility dependency and should continue moving behind replaceable provider contracts.
+- Device identity needs OIDC before a broad multi-device launch.
+- Inventory needs more validated retailer sources.
+- Inventory database ownership is logical, not yet physically isolated.
+- High-cost AI/provider routes need formal rate limiting before substantial public traffic.
+- Email/push alert delivery is not yet part of the alert pipeline.
+- Production dashboards/alerts should be added around provider degradation, cron failures, database readiness, and container cold-start latency.
+
+### Medium term
+
+- Split Inventory.Service persistence into its own database when workload or operational ownership justifies it.
+- Add queued/asynchronous inventory polling if retailer count or release-day demand exceeds request-time fan-out.
+- Add a verified local-card-store provider path so participating stores can publish inventory directly.
+- Replace remaining direct provider assumptions with formal provider capability contracts.
+- Add distributed tracing/correlation IDs across Worker → Core/Inventory → provider calls.
+- Add explicit SLOs and alert thresholds once usage is large enough to make them meaningful.
+
+---
+
+## 24. Evolution path
+
+The current architecture is designed to grow without forcing a rewrite.
+
+A likely progression is:
+
+```text
+Current MVP
+  |
+  +-- OIDC identity
+  +-- Local store inventory provider
+  +-- Provider rate limits / caching
+  +-- Inventory database separation
+  +-- Queue-based retailer polling
+  +-- Push/email notifications
+  +-- Better operational telemetry
+  |
+  v
+Multi-provider collector platform
+```
+
+The intended invariant is that the React client continues to consume stable TCG Signal contracts while provider, storage, and runtime implementations evolve behind those boundaries.
+
+---
+
+## 25. Engineering standard
+
+For changes to this repository:
+
+- Preserve service ownership boundaries.
+- Prefer explicit unknown/degraded states over guessed data.
+- Keep provider-specific behavior behind adapters.
+- Do not expose secrets or internal routes to the browser.
+- Add migrations for Core schema changes.
+- Treat inventory schema as owned by Inventory.Service.
+- Add tests for business rules, not only happy-path rendering.
+- Keep deployment smoke tests representative of actual production dependencies.
+- Document architectural changes that modify trust boundaries, data ownership, or service responsibilities.
+
+---
+
+TCG Signal is intentionally built as more than a card-price UI: the repository demonstrates a production-oriented separation of concerns across edge routing, service boundaries, persistence, provider isolation, billing, ML validation, and reliability behavior while remaining small enough to operate as an MVP.

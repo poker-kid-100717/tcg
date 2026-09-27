@@ -26,10 +26,19 @@
       "/health/*"
     ]
   },
-  "containers": [
+  "ai": {
+    "binding": "AI"
+  },
+    "containers": [
     {
       "class_name": "TcgApi",
       "image": "./backend/Dockerfile",
+      "max_instances": 1,
+      "instance_type": "basic"
+    },
+    {
+      "class_name": "InventoryApi",
+      "image": "./inventory/Dockerfile",
       "max_instances": 1,
       "instance_type": "basic"
     }
@@ -39,6 +48,10 @@
       {
         "name": "API",
         "class_name": "TcgApi"
+      },
+      {
+        "name": "INVENTORY",
+        "class_name": "InventoryApi"
       }
     ]
   },
@@ -47,6 +60,12 @@
       "tag": "v1",
       "new_sqlite_classes": [
         "TcgApi"
+      ]
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": [
+        "InventoryApi"
       ]
     }
   ],

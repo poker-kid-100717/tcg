@@ -16,9 +16,9 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: 'npm'
@@ -38,7 +38,7 @@ jobs:
 
       - name: Deploy to Cloudflare Workers
         id: deploy
-        uses: cloudflare/wrangler-action@v3
+        uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -48,15 +48,70 @@ jobs:
         env:
           TCG_DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
+      - name: Upload optional product secrets
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          TCG_POKEMONTCG_API_KEY: ${{ secrets.POKEMONTCG_API_KEY }}
+          TCG_SCRYDEX_API_KEY: ${{ secrets.SCRYDEX_API_KEY }}
+          TCG_SCRYDEX_TEAM_ID: ${{ secrets.SCRYDEX_TEAM_ID }}
+          TCG_STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          TCG_STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
+          TCG_STRIPE_PRO_MONTHLY_PRICE_ID: ${{ secrets.STRIPE_PRO_MONTHLY_PRICE_ID }}
+          TCG_STRIPE_PRO_ANNUAL_PRICE_ID: ${{ secrets.STRIPE_PRO_ANNUAL_PRICE_ID }}
+          TCG_STRIPE_STORE_FINDER_MONTHLY_PRICE_ID: ${{ secrets.STRIPE_STORE_FINDER_MONTHLY_PRICE_ID }}
+          TCG_STRIPE_COMPLETE_MONTHLY_PRICE_ID: ${{ secrets.STRIPE_COMPLETE_MONTHLY_PRICE_ID }}
+          TCG_BESTBUY_API_KEY: ${{ secrets.BESTBUY_API_KEY }}
+        run: |
+          set -euo pipefail
+
+          put_if_present() {
+            name="$1"
+            value="$2"
+            if [ -n "$value" ]; then
+              printf '%s' "$value" | npx wrangler secret put "$name"
+            fi
+          }
+
+          put_if_present TCG_POKEMONTCG_API_KEY "$TCG_POKEMONTCG_API_KEY"
+          put_if_present TCG_SCRYDEX_API_KEY "$TCG_SCRYDEX_API_KEY"
+          put_if_present TCG_SCRYDEX_TEAM_ID "$TCG_SCRYDEX_TEAM_ID"
+          put_if_present TCG_STRIPE_SECRET_KEY "$TCG_STRIPE_SECRET_KEY"
+          put_if_present TCG_STRIPE_WEBHOOK_SECRET "$TCG_STRIPE_WEBHOOK_SECRET"
+          put_if_present TCG_STRIPE_PRO_MONTHLY_PRICE_ID "$TCG_STRIPE_PRO_MONTHLY_PRICE_ID"
+          put_if_present TCG_STRIPE_PRO_ANNUAL_PRICE_ID "$TCG_STRIPE_PRO_ANNUAL_PRICE_ID"
+          put_if_present TCG_STRIPE_STORE_FINDER_MONTHLY_PRICE_ID "$TCG_STRIPE_STORE_FINDER_MONTHLY_PRICE_ID"
+          put_if_present TCG_STRIPE_COMPLETE_MONTHLY_PRICE_ID "$TCG_STRIPE_COMPLETE_MONTHLY_PRICE_ID"
+          put_if_present TCG_BESTBUY_API_KEY "$TCG_BESTBUY_API_KEY"
+
       - name: Verify production site and API
         shell: bash
         run: |
           set -euo pipefail
           SITE="https://tcg-portfolio-sample.app"
 
-          curl --fail --silent --show-error --retry 12 --retry-delay 10 --retry-all-errors "$SITE/health" | grep -q Healthy
-          curl --fail --silent --show-error "$SITE/sets" | grep -q '<div id="root">'
+          fetch_until() {
+            url="$1"
+            pattern="$2"
+            for attempt in $(seq 1 12); do
+              body="$(curl --fail --silent --show-error --retry 2 --retry-delay 3 --retry-all-errors "$url" 2>/dev/null || true)"
+              if printf '%s' "$body" | grep -q "$pattern"; then
+                return 0
+              fi
+              echo "Verification attempt $attempt failed for $url; retrying..."
+              sleep 10
+            done
+            echo "Production verification failed for $url"
+            return 1
+          }
 
-          # The price guide API answers with the set list from the card database.
-          curl --fail --silent --show-error --retry 3 --retry-delay 10 "$SITE/api/sets" | grep -q '"releaseDate"'
-          curl --fail --silent --show-error "$SITE/api/market/status" | grep -q '"daysOfHistory"'
+          # Cloudflare Containers can be cold immediately after a deploy; verify
+          # readiness and real user/API routes with bounded retries rather than
+          # treating one transient 5xx as a broken release.
+          fetch_until "$SITE/health" "Healthy"
+          fetch_until "$SITE/sets" '<div id="root">'
+          fetch_until "$SITE/pro" '<div id="root">'
+          fetch_until "$SITE/available-in-stores" '<div id="root">'
+          fetch_until "$SITE/api/sets" '"releaseDate"'
+          fetch_until "$SITE/api/market/status" '"daysOfHistory"'

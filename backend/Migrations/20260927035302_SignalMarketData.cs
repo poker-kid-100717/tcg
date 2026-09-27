@@ -7,11 +7,18 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace PokemonTCG.API.Migrations
 {
     /// <inheritdoc />
-    public partial class CatalogAndProvenance : Migration
+    public partial class SignalMarketData : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
+            migrationBuilder.AddColumn<string>(
+                name: "provider_results",
+                table: "snapshot_runs",
+                type: "character varying(4000)",
+                maxLength: 4000,
+                nullable: true);
+
             migrationBuilder.AddColumn<string>(
                 name: "provider",
                 table: "price_snapshots",
@@ -213,6 +220,10 @@ namespace PokemonTCG.API.Migrations
 
             migrationBuilder.DropTable(
                 name: "sets");
+
+            migrationBuilder.DropColumn(
+                name: "provider_results",
+                table: "snapshot_runs");
 
             migrationBuilder.DropColumn(
                 name: "provider",

@@ -1,0 +1,32 @@
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule: { interval: "weekly" }
+    groups:
+      actions:
+        patterns: ["*"]
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule: { interval: "weekly" }
+    groups:
+      edge:
+        patterns: ["*"]
+  - package-ecosystem: "npm"
+    directory: "/frontend"
+    schedule: { interval: "weekly" }
+    groups:
+      frontend:
+        patterns: ["*"]
+  - package-ecosystem: "nuget"
+    directory: "/backend"
+    schedule: { interval: "weekly" }
+    groups:
+      backend:
+        patterns: ["*"]
+  - package-ecosystem: "nuget"
+    directory: "/inventory"
+    schedule: { interval: "weekly" }
+    groups:
+      inventory:
+        patterns: ["*"]

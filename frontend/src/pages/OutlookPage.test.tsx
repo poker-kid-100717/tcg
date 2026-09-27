@@ -31,6 +31,8 @@ const model: ModelSummary = {
   horizonDays: 30,
   trainingRows: 120000,
   validationRows: 30000,
+  historyDays: 120,
+  approxHistoryDaysNeeded: 74,
   typicalErrorPercent: 11.2,
   noChangeErrorPercent: 14.8,
   directionAccuracyPercent: 63.5,
@@ -76,6 +78,8 @@ describe('OutlookPage', () => {
       '/api/predictions/model': {
         ...model,
         status: 'InsufficientHistory',
+        historyDays: 12,
+        approxHistoryDaysNeeded: 74,
         typicalErrorPercent: null,
         importance: [],
         trackRecord: [],
