@@ -9,6 +9,8 @@ public enum MarketProvider
     PokemonTcg,
     /// <summary>The TCGplayer Developer API (market reference prices by product and printing).</summary>
     TCGPlayer,
+    /// <summary>Scrydex: licensed price history and sold listings (raw and graded).</summary>
+    Scrydex,
     /// <summary>eBay sold listings, through an approved API. Disabled until credentials and access exist.</summary>
     Ebay,
     /// <summary>A licensed sales-comp data vendor.</summary>
