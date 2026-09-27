@@ -1,5 +1,13 @@
 import type {
-  Account,
+  AuthOptions,
+  CardHistory,
+  DealAnalysis,
+  DealInput,
+  FeePreset,
+  Me,
+  Plan,
+  SignalCenter,
+  Subscription,
   AlertEvent,
   BillingLink,
   CardDetail,
@@ -35,25 +43,40 @@ export class ApiError extends Error {
   constructor(
     public readonly status: number,
     message: string,
+    /** The ProblemDetails type: "sign_in_required" (401) or "pro_required" (403) tell the UI what to offer. */
+    public readonly type: string | null = null,
   ) {
     super(message);
+  }
+
+  get needsSignIn() {
+    return this.status === 401;
+  }
+
+  get needsPro() {
+    return this.status === 403 && this.type === 'pro_required';
   }
 }
 
 async function request<T>(path: string, init: RequestInit = {}, signal?: AbortSignal): Promise<T> {
   const headers = new Headers(init.headers);
   headers.set('accept', 'application/json');
+  // Marks the request as the app's own (the API refuses state-changing requests without it or a JSON body).
+  headers.set('x-requested-with', 'fetch');
   if (init.body && !headers.has('content-type')) headers.set('content-type', 'application/json');
   const response = await fetch(`${BASE}${path}`, { ...init, headers, signal, credentials: 'same-origin' });
   if (!response.ok) {
     let message = `The request failed (${response.status}).`;
+    let type: string | null = null;
     try {
       const problem = await response.json();
       message = problem.detail ?? problem.title ?? message;
+      type = typeof problem.type === 'string' ? problem.type : null;
     } catch {
       // Not a JSON problem response; keep the generic message.
     }
-    throw new ApiError(response.status, message);
+    if (response.status === 401) type ??= 'sign_in_required';
+    throw new ApiError(response.status, message, type);
   }
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
@@ -93,7 +116,18 @@ export const api = {
       signal,
     ),
 
-  session: () => post<Account>('/session'),
+  me: (signal?: AbortSignal) => get<Me>('/me', signal),
+  authOptions: (signal?: AbortSignal) => get<AuthOptions>('/auth/options', signal),
+  localLogin: (email: string) => post<void>('/auth/local-login', { email }),
+  logout: () => post<void>('/auth/logout'),
+  deleteAccount: () => del<void>('/account'),
+  plans: (signal?: AbortSignal) => get<Plan[]>('/billing/plans', signal),
+  subscription: (signal?: AbortSignal) => get<Subscription>('/billing/subscription', signal),
+  signals: (kind: string, minConfidence: number, signal?: AbortSignal) =>
+    get<SignalCenter>(`/signals?kind=${enc(kind)}&minConfidence=${minConfidence}&limit=100`, signal),
+  dealPresets: (signal?: AbortSignal) => get<FeePreset[]>('/deals/presets', signal),
+  analyzeDeal: (input: DealInput) => post<DealAnalysis>('/deals/analyze', input),
+  history: (id: string, days: number, signal?: AbortSignal) => get<CardHistory>(`/cards/${enc(id)}/history?days=${days}`, signal),
   intelligence: (id: string, variant: string, signal?: AbortSignal) =>
     get<MarketIntelligence>(`/cards/${enc(id)}/intelligence?variant=${enc(variant)}`, signal),
   watchlist: (signal?: AbortSignal) => get<WatchlistItem[]>('/watchlist', signal),

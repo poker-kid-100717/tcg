@@ -3,7 +3,7 @@ using PokemonTCG.API.Product;
 
 namespace PokemonTCG.API.Accounts;
 
-public record AuthOptionsView(bool SignInAvailable, bool LocalLogin, string ProviderName);
+public record AuthOptionsView(bool SignInAvailable, bool ProviderSignIn, bool LocalLogin, string ProviderName);
 public record LocalLoginRequest(string? Email);
 public record MeView(bool SignedIn, string? Email, string? DisplayName, AccountView? Account);
 
@@ -14,7 +14,7 @@ public static class AuthEndpoints
         var auth = app.MapGroup("/api/auth");
 
         auth.MapGet("/options", (AuthOptions options) =>
-            new AuthOptionsView(options.OidcConfigured || options.LocalLogin, options.LocalLogin, options.ProviderName));
+            new AuthOptionsView(options.OidcConfigured || options.LocalLogin, options.OidcConfigured, options.LocalLogin, options.ProviderName));
 
         // Starts the provider's sign-in. The return path must be local, so this can't be used as an open redirect.
         auth.MapGet("/login", (string? returnUrl, AuthOptions options) =>

@@ -67,12 +67,54 @@ export const useModelSummary = () =>
   useQuery({ queryKey: ['model'], queryFn: ({ signal }) => api.model(signal), staleTime: minutes(30) });
 
 
+/** Who's signed in (signedIn false for visitors). Every account-scoped screen keys off this. */
+export const useMe = () =>
+  useQuery({ queryKey: ['me'], queryFn: ({ signal }) => api.me(signal), staleTime: minutes(5), retry: 1 });
+
+/** The signed-in account's plan and entitlements, or null for a visitor. Shares the /me cache. */
 export const useSession = () =>
+  useQuery({ queryKey: ['me'], queryFn: ({ signal }) => api.me(signal), staleTime: minutes(5), retry: 1, select: (me) => me.account });
+
+export const useAuthOptions = () =>
+  useQuery({ queryKey: ['auth-options'], queryFn: ({ signal }) => api.authOptions(signal), staleTime: minutes(60) });
+
+/** Signing in or out changes every account-scoped answer, so drop them all. */
+const useResetOnSuccess = <T,>(mutationFn: (arg: T) => Promise<void>) => {
+  const queryClient = useQueryClient();
+  return useMutation({ mutationFn, onSuccess: () => queryClient.resetQueries() });
+};
+
+export const useLocalLogin = () => useResetOnSuccess(api.localLogin);
+export const useLogout = () => useResetOnSuccess(() => api.logout());
+export const useDeleteAccount = () => useResetOnSuccess(() => api.deleteAccount());
+
+export const usePlans = () =>
+  useQuery({ queryKey: ['plans'], queryFn: ({ signal }) => api.plans(signal), staleTime: minutes(60) });
+
+export const useSubscription = (enabled: boolean) =>
+  useQuery({ queryKey: ['subscription'], queryFn: ({ signal }) => api.subscription(signal), enabled, retry: shouldRetry });
+
+export const useSignals = (kind: string, minConfidence: number, enabled: boolean) =>
   useQuery({
-    queryKey: ['session'],
-    queryFn: () => api.session(),
-    staleTime: Infinity,
-    retry: 1,
+    queryKey: ['signals', kind, minConfidence],
+    queryFn: ({ signal }) => api.signals(kind, minConfidence, signal),
+    enabled,
+    staleTime: minutes(30),
+    retry: shouldRetry,
+  });
+
+export const useDealPresets = (enabled: boolean) =>
+  useQuery({ queryKey: ['deal-presets'], queryFn: ({ signal }) => api.dealPresets(signal), enabled, staleTime: minutes(60) });
+
+export const useAnalyzeDeal = () => useMutation({ mutationFn: api.analyzeDeal });
+
+export const useCardHistory = (cardId: string, days: number, enabled: boolean) =>
+  useQuery({
+    queryKey: ['history', cardId, days],
+    queryFn: ({ signal }) => api.history(cardId, days, signal),
+    enabled: enabled && cardId.length > 0,
+    staleTime: minutes(30),
+    retry: shouldRetry,
   });
 
 export const useIntelligence = (cardId: string, variant: string, enabled = true) =>
@@ -84,23 +126,29 @@ export const useIntelligence = (cardId: string, variant: string, enabled = true)
     retry: shouldRetry,
   });
 
-export const useWatchlist = () =>
+export const useWatchlist = (enabled = true) =>
   useQuery({
     queryKey: ['watchlist'],
+    enabled,
+    retry: shouldRetry,
     queryFn: ({ signal }) => api.watchlist(signal),
     staleTime: minutes(5),
   });
 
-export const useAlerts = () =>
+export const useAlerts = (enabled = true) =>
   useQuery({
     queryKey: ['alerts'],
+    enabled,
+    retry: shouldRetry,
     queryFn: ({ signal }) => api.alerts(signal),
     staleTime: minutes(2),
   });
 
-export const useDashboard = () =>
+export const useDashboard = (enabled = true) =>
   useQuery({
     queryKey: ['dashboard'],
+    enabled,
+    retry: shouldRetry,
     queryFn: ({ signal }) => api.dashboard(signal),
     staleTime: minutes(2),
   });
@@ -171,9 +219,11 @@ export const useReadAllAlerts = () => {
 };
 
 
-export const useMasterSets = () =>
+export const useMasterSets = (enabled = true) =>
   useQuery({
     queryKey: ['master-sets'],
+    enabled,
+    retry: shouldRetry,
     queryFn: ({ signal }) => api.masterSets(signal),
     staleTime: minutes(2),
   });

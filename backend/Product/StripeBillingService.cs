@@ -47,7 +47,7 @@ public sealed class StripeBillingService(
         {
             ["mode"] = "subscription",
             // Landing here grants nothing: entitlements change only when the verified webhook arrives.
-            ["success_url"] = plan is "storefinder" or "complete" ? $"{site}/available-in-stores?checkout=success" : $"{site}/dashboard?checkout=success",
+            ["success_url"] = plan is "storefinder" or "complete" ? $"{site}/available-in-stores?checkout=success" : $"{site}/pro?checkout=success",
             ["cancel_url"] = $"{site}/pro?checkout=cancelled",
             ["client_reference_id"] = userId.ToString(),
             ["line_items[0][price]"] = priceId,
