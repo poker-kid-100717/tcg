@@ -45,7 +45,7 @@ function TrueMarket({ data }: { data: MarketIntelligence }) {
             <h2 id="true-market-heading" className="text-lg">True Market</h2>
             <ProBadge />
           </div>
-          <p className="mt-1 text-sm text-slate-500">{data.variantLabel} · market reference from {data.source}</p>
+          <p className="mt-1 text-sm text-slate-500">{data.variantLabel} · {data.source}</p>
           <div className="mt-2"><FreshnessChip freshness={data.freshness} /></div>
         </div>
         <div className="text-right">
@@ -89,7 +89,7 @@ function TrueMarket({ data }: { data: MarketIntelligence }) {
               {data.confidenceFactors.map((f) => (
                 <li key={f.name} className="flex justify-between gap-3">
                   <span>{f.detail}</span>
-                  <span className="shrink-0 font-semibold tabular-nums text-slate-700">−{f.penalty}</span>
+                  <span className="shrink-0 font-semibold tabular-nums text-slate-700">{f.penalty > 0 ? `−${f.penalty}` : 'ok'}</span>
                 </li>
               ))}
             </ul>

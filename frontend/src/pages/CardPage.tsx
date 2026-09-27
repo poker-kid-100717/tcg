@@ -94,7 +94,8 @@ export default function CardPage() {
                     imageUrl: card.imageUrl,
                     targetBelow: null,
                     targetAbove: null,
-                    movePercent: 10,
+                    // A plain watch; alert rules are set on the watchlist (Pro).
+                    movePercent: null,
                   }}
                 />
                 <Link to={`/deal?card=${encodeURIComponent(card.id)}`} className="btn bg-white text-pokemon-pokeblue ring-1 ring-pokemon-pokeblue">

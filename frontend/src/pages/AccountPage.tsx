@@ -51,7 +51,9 @@ function SignIn({ returnUrl }: { returnUrl: string }) {
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    login.mutate(email.trim(), { onSuccess: () => navigate(returnUrl) });
+    // mutateAsync, not mutate(…, {onSuccess}): signing in resets every query, which unmounts this form before a
+    // per-call callback would run.
+    login.mutateAsync(email.trim()).then(() => navigate(returnUrl), () => undefined);
   };
 
   if (options.isPending) return <Loading label="Loading sign-in options…" />;
@@ -117,7 +119,7 @@ function SignedIn() {
             <p className="text-sm text-slate-500">Signed in as</p>
             <p className="font-semibold text-slate-900">{me.data!.email ?? me.data!.displayName ?? 'your account'}</p>
           </div>
-          <button type="button" className="btn-ghost" disabled={logout.isPending} onClick={() => logout.mutate(undefined, { onSuccess: () => navigate('/') })}>
+          <button type="button" className="btn-ghost" disabled={logout.isPending} onClick={() => logout.mutateAsync().then(() => navigate('/'), () => undefined)}>
             Sign out
           </button>
         </div>
@@ -166,7 +168,7 @@ function SignedIn() {
           type="button"
           className="btn w-fit bg-red-700 text-white disabled:opacity-50"
           disabled={confirm !== 'DELETE' || remove.isPending}
-          onClick={() => remove.mutate(undefined, { onSuccess: () => navigate('/') })}
+          onClick={() => remove.mutateAsync().then(() => navigate('/'), () => undefined)}
         >
           {remove.isPending ? 'Deleting…' : 'Delete my account'}
         </button>

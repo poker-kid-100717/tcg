@@ -3,6 +3,18 @@ import { Link } from 'react-router-dom';
 import type { SignalItem } from '../api/types';
 import { formatDate } from '../lib/format';
 
+export const SIGNAL_LABELS: Record<string, string> = {
+  Momentum: 'Momentum',
+  Acceleration: 'Acceleration',
+  UnusualMove: 'Unusual move',
+  VolatilityExpansion: 'Volatility expansion',
+  New30DayHigh: 'New 30-day high',
+  New30DayLow: 'New 30-day low',
+  ThinSupply: 'Thin supply',
+  Sleeper: 'Sleeper',
+  SustainedDowntrend: 'Sustained downtrend',
+};
+
 const valueLabel = (s: { value: number; unit: string }) =>
   `${s.value > 0 && s.unit === '%' ? '+' : ''}${s.value}${s.unit === 'pts' ? ' pts' : s.unit}`;
 

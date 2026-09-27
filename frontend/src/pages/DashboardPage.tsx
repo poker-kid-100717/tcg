@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom';
 
 import { useDashboard, useMe, useReadAlert, useReadAllAlerts } from '../api/hooks';
 import { FreshnessChip, ProBadge, ProLock, SignInPrompt } from '../components/Gates';
-import { SignalRow } from '../components/SignalRow';
+import { SIGNAL_LABELS, SignalRow } from '../components/SignalRow';
 import { ErrorState, Loading } from '../components/States';
 import { formatDate, formatPrice } from '../lib/format';
 
@@ -147,7 +147,7 @@ export default function DashboardPage() {
           {Object.keys(data.market.signalCounts).length > 0 && (
             <ul className="flex flex-wrap gap-2 text-xs">
               {Object.entries(data.market.signalCounts).map(([kind, count]) => (
-                <li key={kind} className="rounded-full bg-slate-100 px-2.5 py-1 font-semibold text-slate-700">{kind.replace(/([a-z])([A-Z0-9])/g, '$1 $2')}: {count}</li>
+                <li key={kind} className="rounded-full bg-slate-100 px-2.5 py-1 font-semibold text-slate-700">{SIGNAL_LABELS[kind] ?? kind}: {count}</li>
               ))}
             </ul>
           )}

@@ -2,21 +2,10 @@ import { useState } from 'react';
 
 import { useMe, useSignals } from '../api/hooks';
 import { FreshnessChip, ProBadge, ProLock } from '../components/Gates';
-import { SignalRow } from '../components/SignalRow';
+import { SIGNAL_LABELS, SignalRow } from '../components/SignalRow';
 import { ErrorState, Loading } from '../components/States';
 
-const KINDS: { id: string; label: string }[] = [
-  { id: '', label: 'All signals' },
-  { id: 'Momentum', label: 'Momentum' },
-  { id: 'Acceleration', label: 'Acceleration' },
-  { id: 'UnusualMove', label: 'Unusual move' },
-  { id: 'VolatilityExpansion', label: 'Volatility expansion' },
-  { id: 'New30DayHigh', label: 'New 30-day high' },
-  { id: 'New30DayLow', label: 'New 30-day low' },
-  { id: 'ThinSupply', label: 'Thin supply' },
-  { id: 'Sleeper', label: 'Sleeper' },
-  { id: 'SustainedDowntrend', label: 'Sustained downtrend' },
-];
+const KINDS = [{ id: '', label: 'All signals' }, ...Object.entries(SIGNAL_LABELS).map(([id, label]) => ({ id, label }))];
 
 export default function SignalsPage() {
   const me = useMe();
