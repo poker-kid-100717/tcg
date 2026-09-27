@@ -141,14 +141,61 @@ public static class ProductEndpoints
             HttpContext context,
             EntitlementService entitlements,
             ProductStore store,
+            SignalCenterService signals,
+            TimeProvider clock,
             CancellationToken ct) =>
         {
-            var user = new { Id = context.User.RequireUserId() };
-            var account = await entitlements.GetAccountAsync(user.Id, ct);
-            var watchlist = await store.GetWatchlistAsync(user.Id, ct);
-            var alerts = await store.GetAlertsAsync(user.Id, 20, ct);
-            return Results.Ok(new DashboardView(account, watchlist, alerts, alerts.Count(a => a.ReadAt is null)));
+            var userId = context.User.RequireUserId();
+            var account = await entitlements.GetAccountAsync(userId, ct);
+            var watchlist = await store.GetWatchlistAsync(userId, ct);
+            var alerts = await store.GetAlertsAsync(userId, 50, ct);
+            var weekAgo = clock.GetUtcNow().AddDays(-7);
+            return Results.Ok(new DashboardView(account, watchlist, alerts.Take(20).ToList(), alerts.Count(a => a.ReadAt is null))
+            {
+                Movers = await signals.MoversAsync(watchlist, ct),
+                WatchedSignals = account.IsPro
+                    ? await signals.ForPrintingsAsync(watchlist.Select(w => (w.CardId, w.Variant)).ToList(), ct)
+                    : [],
+                SignalsLocked = !account.IsPro,
+                TargetsHit7Days = alerts.Count(a => a.Kind is AlertEvaluationService.Below or AlertEvaluationService.Above && a.CreatedAt >= weekAgo),
+                Market = await signals.SummaryAsync(ct),
+            });
         });
+
+        // Pro: up to a year of daily history (the public card page carries 30 days).
+        api.MapGet("/cards/{id}/history", async Task<IResult> (string id, int? days, AppDbContext db, TimeProvider clock, CancellationToken ct) =>
+            {
+                var span = Math.Clamp(days ?? 365, 30, 365);
+                var since = DateOnly.FromDateTime(clock.GetUtcNow().UtcDateTime).AddDays(-span);
+                var history = await db.PriceSnapshots.AsNoTracking()
+                    .Where(s => s.CardId == id && s.Date >= since)
+                    .OrderBy(s => s.Date)
+                    .Select(s => new PokemonTCG.API.Pricing.PricePoint(s.Date, s.Variant, s.Market))
+                    .ToListAsync(ct);
+                return history.Count == 0 && !await db.Cards.AnyAsync(c => c.Id == id, ct)
+                    ? Results.NotFound()
+                    : Results.Ok(new { Id = id, HistoryDays = span, History = history });
+            })
+            .RequireAuthorization(AuthPolicies.RequirePro);
+
+        // Deal Analyzer: presets are visible to everyone signed in (the page shows them locked); the analysis is Pro.
+        api.MapGet("/deals/presets", (DealAnalyzerService deals) => deals.Presets);
+        api.MapPost("/deals/analyze", async Task<IResult> (DealRequest request, DealAnalyzerService deals, CancellationToken ct) =>
+            {
+                if (string.IsNullOrWhiteSpace(request.CardId) || request.CardId.Length > 64 || string.IsNullOrWhiteSpace(request.Variant) || request.Variant.Length > 40)
+                    return Results.ValidationProblem(new Dictionary<string, string[]> { ["card"] = ["Choose a card and printing."] });
+                decimal?[] amounts = [request.AskingPrice, request.InboundShipping, request.Tax, request.OutboundShipping, request.ExpectedSalePrice, request.CustomFixedFee];
+                if (amounts.Any(a => a is < 0 or > 1_000_000) || request.CustomPercentFee is < 0 or > 100)
+                    return Results.ValidationProblem(new Dictionary<string, string[]> { ["amounts"] = ["Amounts must be between $0 and $1,000,000, and fees between 0% and 100%."] });
+                return await deals.AnalyzeAsync(request, ct) is { } analysis ? Results.Ok(analysis) : Results.NotFound();
+            })
+            .RequireAuthorization(AuthPolicies.RequirePro)
+            .RequireRateLimiting(AuthPolicies.ToolRateLimit);
+
+        // Pro: the day's market-wide signals, strongest evidence first.
+        api.MapGet("/signals", (string? kind, int? minConfidence, int? limit, SignalCenterService signals, CancellationToken ct) =>
+                signals.GetAsync(kind?.Trim(), Math.Clamp(minConfidence ?? 0, 0, 100), Math.Clamp(limit ?? 50, 1, 200), ct))
+            .RequireAuthorization(AuthPolicies.RequirePro);
 
         api.MapGet("/master-sets", async (
             HttpContext context,

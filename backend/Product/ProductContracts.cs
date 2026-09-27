@@ -97,7 +97,17 @@ public record DashboardView(
     AccountView Account,
     IReadOnlyList<WatchlistItemView> Watchlist,
     IReadOnlyList<AlertView> Alerts,
-    int UnreadAlerts);
+    int UnreadAlerts)
+{
+    /// <summary>The watched printings that moved most over 7 days.</summary>
+    public IReadOnlyList<WatchlistMoverView> Movers { get; init; } = [];
+    /// <summary>Today's signals on watched printings (Pro; empty and <see cref="SignalsLocked"/> otherwise).</summary>
+    public IReadOnlyList<SignalItemView> WatchedSignals { get; init; } = [];
+    public bool SignalsLocked { get; init; }
+    /// <summary>Price-target alerts in the last 7 days.</summary>
+    public int TargetsHit7Days { get; init; }
+    public MarketSummaryView? Market { get; init; }
+}
 
 public record SoldCompView(
     string Id,

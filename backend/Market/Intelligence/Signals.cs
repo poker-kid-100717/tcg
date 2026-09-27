@@ -87,9 +87,9 @@ public static class Signals
             var prior = window.Take(window.Count - 1).Select(p => p.Market!.Value).ToList();
             var now = latest.Market!.Value;
             if (now > prior.Max())
-                Add(New30DayHigh, "New 30-day high", SeriesPercent(now, prior.Max()), "%", 30, $"{now:C} is above the previous 30-day high of {prior.Max():C}.");
+                Add(New30DayHigh, "New 30-day high", SeriesPercent(now, prior.Max()), "%", 30, $"${now:0.00} is above the previous 30-day high of ${prior.Max():0.00}.");
             if (now < prior.Min())
-                Add(New30DayLow, "New 30-day low", SeriesPercent(now, prior.Min()), "%", 30, $"{now:C} is below the previous 30-day low of {prior.Min():C}.");
+                Add(New30DayLow, "New 30-day low", SeriesPercent(now, prior.Min()), "%", 30, $"${now:0.00} is below the previous 30-day low of ${prior.Min():0.00}.");
         }
 
         if (m.LowVsMarket is { } gap)

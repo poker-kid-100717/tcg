@@ -49,12 +49,18 @@ public static class PriceGuideEndpoints
         // locally), never from a browser.
         app.MapPost("/internal/snapshots", async Task<IResult> (
             PriceSnapshotService snapshots,
+            PokemonTCG.API.Market.Intelligence.SignalRefreshService signals,
             AlertEvaluationService alerts,
             CancellationToken ct) =>
         {
             var result = await snapshots.RunAsync(ct);
             if (result is null) return Results.Conflict(new { message = "A snapshot run is already in progress." });
-            if (result.Status == SnapshotStatus.Succeeded) await alerts.EvaluateAsync(ct);
+            if (result.Status == SnapshotStatus.Succeeded)
+            {
+                // Signals first: signal alerts read the day's stored signals.
+                await signals.RefreshAsync(ct);
+                await alerts.EvaluateAsync(ct);
+            }
             return Results.Ok(result);
         });
     }

@@ -184,6 +184,15 @@ namespace PokemonTcgMarketplace.Backend.Tests
                 });
     }
 
+    /// <summary>Its own database, so alert and signal tests control which day is "latest" across the market.</summary>
+    public sealed class AlertsFixture : ApiFixture;
+
+    [CollectionDefinition(Name)]
+    public class AlertsCollection : ICollectionFixture<AlertsFixture>
+    {
+        public const string Name = "alerts";
+    }
+
     [CollectionDefinition(Name)]
     public class OidcCollection : ICollectionFixture<OidcFixture>
     {

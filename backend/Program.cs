@@ -125,6 +125,15 @@ builder.Services.AddHttpClient<ScrydexClient>(client =>
 });
 builder.Services.AddScoped<MarketIntelligenceService>();
 builder.Services.AddScoped<AlertEvaluationService>();
+builder.Services.AddScoped<SignalCenterService>();
+// Fee presets: configured presets replace the defaults rather than being appended to them.
+var dealOptions = new DealOptions();
+if (builder.Configuration.GetSection($"{DealOptions.SectionName}:Presets").Get<List<FeePreset>>() is { Count: > 0 } presets) dealOptions.Presets = presets;
+builder.Services.AddSingleton(dealOptions);
+builder.Services.AddScoped<DealAnalyzerService>();
+builder.Services.AddSingleton(builder.Configuration.GetSection(AlertOptions.SectionName).Get<AlertOptions>() ?? new AlertOptions());
+builder.Services.AddScoped<INotificationSender, InAppNotificationSender>();
+builder.Services.AddScoped<PokemonTCG.API.Market.Intelligence.SignalRefreshService>();
 builder.Services.AddHttpClient<StripeBillingService>();
 
 // Accounts: OpenID Connect sign-in with a server-side session cookie, the RequirePro policy and rate limits.
