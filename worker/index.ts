@@ -10,7 +10,13 @@ export interface Env {
   TCG_DATABASE_URL: string;
   /** Optional: raises the Pokémon TCG API's rate limit. */
   TCG_POKEMONTCG_API_KEY?: string;
-  /** Optional until billing goes live; absent values keep the app in founding-preview mode. */
+  /** OpenID Connect sign-in (Auth0, Entra External ID, Okta, Keycloak…). Without these, nobody can sign in. */
+  TCG_AUTH_AUTHORITY?: string;
+  TCG_AUTH_CLIENT_ID?: string;
+  TCG_AUTH_CLIENT_SECRET?: string;
+  /** Shown on the sign-in button, e.g. "Google" or "Auth0". Not a secret; set in wrangler.jsonc vars or as a secret. */
+  TCG_AUTH_PROVIDER_NAME?: string;
+  /** Optional until billing goes live; without them everyone is on the free plan. */
   TCG_STRIPE_SECRET_KEY?: string;
   TCG_STRIPE_WEBHOOK_SECRET?: string;
   TCG_STRIPE_PRO_MONTHLY_PRICE_ID?: string;
@@ -45,6 +51,10 @@ export class TcgApi extends Container<Env> {
       ASPNETCORE_ENVIRONMENT: "Production",
       ConnectionStrings__DefaultConnection: env.TCG_DATABASE_URL,
       ...(env.TCG_POKEMONTCG_API_KEY ? { PokemonTcgApi__ApiKey: env.TCG_POKEMONTCG_API_KEY } : {}),
+      ...(env.TCG_AUTH_AUTHORITY && env.TCG_AUTH_CLIENT_ID && env.TCG_AUTH_CLIENT_SECRET
+        ? { Auth__Authority: env.TCG_AUTH_AUTHORITY, Auth__ClientId: env.TCG_AUTH_CLIENT_ID, Auth__ClientSecret: env.TCG_AUTH_CLIENT_SECRET }
+        : {}),
+      ...(env.TCG_AUTH_PROVIDER_NAME ? { Auth__ProviderName: env.TCG_AUTH_PROVIDER_NAME } : {}),
       ...(env.TCG_STRIPE_SECRET_KEY ? { Billing__StripeSecretKey: env.TCG_STRIPE_SECRET_KEY } : {}),
       ...(env.TCG_STRIPE_WEBHOOK_SECRET ? { Billing__StripeWebhookSecret: env.TCG_STRIPE_WEBHOOK_SECRET } : {}),
       ...(env.TCG_STRIPE_PRO_MONTHLY_PRICE_ID ? { Billing__ProMonthlyPriceId: env.TCG_STRIPE_PRO_MONTHLY_PRICE_ID } : {}),
@@ -83,6 +93,13 @@ export class InventoryApi extends Container<Env> {
 export const isApiPath = (pathname: string) =>
   pathname.startsWith("/api/") || pathname === "/health" || pathname.startsWith("/health/");
 
+/** Mirrors the API's CSRF rule: this site's Origin (when sent) and a JSON or X-Requested-With request. */
+export const isSameSiteRequest = (request: Request, url: URL) => {
+  const origin = request.headers.get("Origin");
+  if (origin && origin !== url.origin) return false;
+  return request.headers.has("X-Requested-With") || (request.headers.get("content-type") ?? "").startsWith("application/json");
+};
+
 const api = (env: Env) => env.API.getByName("api");
 const inventoryApi = (env: Env) => env.INVENTORY.getByName("inventory");
 
@@ -103,20 +120,25 @@ export default {
       const sessionHeaders = new Headers(request.headers);
       sessionHeaders.set("X-Forwarded-Proto", url.protocol.slice(0, -1));
       sessionHeaders.set("X-Forwarded-Host", url.host);
-      const sessionUrl = new URL(request.url);
-      sessionUrl.pathname = "/api/session";
-      sessionUrl.search = "";
+      const meUrl = new URL(request.url);
+      meUrl.pathname = "/api/me";
+      meUrl.search = "";
 
-      const sessionResponse = await api(env).fetch(new Request(sessionUrl, {
-        method: "POST",
-        headers: sessionHeaders,
-      }));
-      if (!sessionResponse.ok) return sessionResponse;
+      // The API reads the session cookie; the Worker only asks who this is and what they may use.
+      const meResponse = await api(env).fetch(new Request(meUrl, { method: "GET", headers: sessionHeaders }));
+      if (!meResponse.ok) return meResponse;
 
-      const account = await sessionResponse.json() as { hasStoreFinder?: boolean };
-      if (!account.hasStoreFinder) {
+      const me = await meResponse.json() as { signedIn?: boolean; account?: { hasStoreFinder?: boolean } | null };
+      if (!me.signedIn) {
+        return Response.json(
+          { type: "sign_in_required", title: "Sign in required", status: 401 },
+          { status: 401, headers: { "content-type": "application/problem+json" } },
+        );
+      }
+      if (!me.account?.hasStoreFinder) {
         return Response.json(
           {
+            type: "store_finder_required",
             title: "Store Finder required",
             detail: "Available in Stores is a separate Store Finder subscription.",
             status: 403,
@@ -137,6 +159,10 @@ export default {
     // user-scoped collection/market context; Workers AI turns that into a short explanation.
     const advisorMatch = url.pathname.match(/^\/api\/master-sets\/(\d+)\/advisor$/);
     if (advisorMatch && request.method === "POST") {
+      // This POST is answered here, not by the API, so apply the API's same-site rule here too.
+      if (!isSameSiteRequest(request, url)) {
+        return Response.json({ type: "csrf", title: "Requests must come from this site.", status: 403 }, { status: 403 });
+      }
       const headers = new Headers(request.headers);
       headers.set("X-Forwarded-Proto", url.protocol.slice(0, -1));
       headers.set("X-Forwarded-Host", url.host);

@@ -6,7 +6,7 @@ vi.mock("@cloudflare/containers", () => ({ Container: class {} }));
 
 const { default: worker, PREDICTIONS_CRON } = await import("./index");
 
-function createEnv(account: Record<string, unknown> = {}) {
+function createEnv(account: Record<string, unknown> | null = {}) {
   const apiRequests: Request[] = [];
   const inventoryRequests: Request[] = [];
   const env = {
@@ -16,7 +16,8 @@ function createEnv(account: Record<string, unknown> = {}) {
         fetch: async (req: Request) => {
           apiRequests.push(req);
           const pathname = new URL(req.url).pathname;
-          return new Response(JSON.stringify(pathname === "/api/session" ? account : {}), {
+          const me = { signedIn: account !== null, account };
+          return new Response(JSON.stringify(pathname === "/api/me" ? me : {}), {
             headers: { "content-type": "application/json" },
           });
         },
@@ -86,7 +87,8 @@ describe("worker routing", () => {
 
     expect(response.status).toBe(403);
     expect(apiRequests).toHaveLength(1);
-    expect(new URL(apiRequests[0].url).pathname).toBe("/api/session");
+    expect(new URL(apiRequests[0].url).pathname).toBe("/api/me");
+    expect(apiRequests[0].method).toBe("GET");
     expect(inventoryRequests).toHaveLength(0);
   });
 
@@ -104,10 +106,36 @@ describe("worker routing", () => {
 
     expect(response.status).toBe(200);
     expect(apiRequests).toHaveLength(1);
-    expect(new URL(apiRequests[0].url).pathname).toBe("/api/session");
+    expect(new URL(apiRequests[0].url).pathname).toBe("/api/me");
+    expect(apiRequests[0].method).toBe("GET");
     expect(inventoryRequests).toHaveLength(1);
     expect(new URL(inventoryRequests[0].url).pathname).toBe("/api/inventory/nearby");
     expect(env.INVENTORY.getByName).toHaveBeenCalledWith("inventory");
+  });
+
+  it("asks visitors to sign in before any inventory lookup", async () => {
+    const { env, inventoryRequests } = createEnv(null);
+
+    const response = await worker.fetch(
+      new Request("https://tcg.example.com/api/inventory/nearby", { method: "POST", body: "{}", headers: { "content-type": "application/json" } }),
+      env,
+    );
+
+    expect(response.status).toBe(401);
+    expect(await response.json()).toMatchObject({ type: "sign_in_required" });
+    expect(inventoryRequests).toHaveLength(0);
+  });
+
+  it("refuses a cross-site AI advisor request before calling the API", async () => {
+    const { env, apiRequests } = createEnv();
+
+    const response = await worker.fetch(
+      new Request("https://tcg.example.com/api/master-sets/1/advisor", { method: "POST", headers: { Origin: "https://evil.example" } }),
+      env,
+    );
+
+    expect(response.status).toBe(403);
+    expect(apiRequests).toHaveLength(0);
   });
 
   it("never exposes the snapshot job to the internet", async () => {
