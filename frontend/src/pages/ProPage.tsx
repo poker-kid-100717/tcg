@@ -1,25 +1,56 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 
 import { api } from '../api/client';
-import { useSession } from '../api/hooks';
+import { useMe, usePlans } from '../api/hooks';
+import type { Plan } from '../api/types';
+import { SignInLink } from '../components/Gates';
 import { Loading } from '../components/States';
 
 type CheckoutPlan = 'monthly' | 'annual' | 'storefinder' | 'complete';
 
+const price = (plan: Plan | undefined) =>
+  plan ? new Intl.NumberFormat('en-US', { style: 'currency', currency: plan.currency, maximumFractionDigits: plan.price % 1 ? 2 : 0 }).format(plan.price) : '—';
+
+const COMPARISON: [string, string, string][] = [
+  ['Card prices, sets, search, 30-day history', '✓', '✓'],
+  ['Market movers, sleepers and downtrends', '✓', '✓'],
+  ['Watchlist', 'Up to 3 cards', 'Unlimited'],
+  ['Price, move and signal alerts', '—', '✓'],
+  ['True Market: confidence score with reasons', '—', '✓'],
+  ['Verified sold comps kept separate from reference prices', '—', '✓'],
+  ['Signal center (9 published rules)', '—', '✓'],
+  ['“Why is this moving?” explanations', '—', '✓'],
+  ['Deal Analyzer with fee presets and break-even', '—', '✓'],
+  ['Up to a year of price history', '—', '✓'],
+];
+
 export default function ProPage() {
-  const session = useSession();
+  const me = useMe();
+  const plans = usePlans();
+  const [params] = useSearchParams();
   const [working, setWorking] = useState<CheckoutPlan | 'portal' | null>(null);
   const [error, setError] = useState('');
+  const checkoutState = params.get('checkout');
 
-  if (session.isPending) return <Loading label="Loading plans…" />;
+  // Coming back from Checkout: Pro unlocks when Stripe's webhook confirms payment, usually within seconds.
+  useEffect(() => {
+    if (checkoutState !== 'success' || me.data?.account?.isPro) return;
+    const timer = window.setInterval(() => me.refetch(), 3000);
+    return () => window.clearInterval(timer);
+  }, [checkoutState, me.data?.account?.isPro]);
 
-  const account = session.data;
-  const goCheckout = async (plan: CheckoutPlan) => {
-    setWorking(plan);
+  if (me.isPending || plans.isPending) return <Loading label="Loading plans…" />;
+
+  const account = me.data?.account ?? null;
+  const signedIn = Boolean(me.data?.signedIn);
+  const plan = (id: Plan['id']) => plans.data?.find((p) => p.id === id);
+
+  const goCheckout = async (id: CheckoutPlan) => {
+    setWorking(id);
     setError('');
     try {
-      const result = await api.checkout(plan);
-      window.location.assign(result.url);
+      window.location.assign((await api.checkout(id)).url);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Unable to start checkout.');
       setWorking(null);
@@ -30,166 +61,138 @@ export default function ProPage() {
     setWorking('portal');
     setError('');
     try {
-      const result = await api.billingPortal();
-      window.location.assign(result.url);
+      window.location.assign((await api.billingPortal()).url);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Unable to open billing.');
       setWorking(null);
     }
   };
 
-  const preview = !account?.billingConfigured;
+  const action = (id: CheckoutPlan, label: string, owned: boolean, secondary = false) => {
+    const p = plan(id);
+    const style = `btn w-full ${secondary ? 'bg-white text-pokemon-pokeblue ring-1 ring-pokemon-pokeblue' : 'bg-pokemon-pokeblue text-white'}`;
+    if (owned && account?.canManageBilling) {
+      return (
+        <button type="button" className="btn w-full bg-pokemon-pokeblue text-white" disabled={working !== null} onClick={manage}>
+          {working === 'portal' ? 'Opening…' : 'Manage subscription'}
+        </button>
+      );
+    }
+    if (owned) return <p className="rounded-lg bg-emerald-50 px-4 py-3 text-center text-sm font-semibold text-emerald-800">Your current plan</p>;
+    if (!p?.available) return <p className="rounded-lg bg-slate-50 px-4 py-3 text-center text-sm text-slate-600">Not available yet</p>;
+    if (!signedIn) return <SignInLink className={style}>Sign in to subscribe</SignInLink>;
+    return (
+      <button type="button" className={style} disabled={working !== null} onClick={() => goCheckout(id)}>
+        {working === id ? 'Opening checkout…' : label}
+      </button>
+    );
+  };
+
+  const monthly = plan('monthly');
+  const annual = plan('annual');
+  const annualSaving = monthly && annual && monthly.price > 0 ? Math.round((1 - annual.price / (monthly.price * 12)) * 100) : null;
+  const hasPro = Boolean(account?.isPro);
 
   return (
     <div className="container-custom grid gap-10 py-10 sm:py-14">
       <header className="mx-auto grid max-w-3xl gap-3 text-center">
-        <p className="eyebrow">TCG Signal plans</p>
-        <h1 className="text-4xl sm:text-5xl">Price intelligence and local inventory, separately or together.</h1>
+        <p className="eyebrow">TCG Signal Pro</p>
+        <h1 className="text-4xl sm:text-5xl">Know what a card is really worth before you buy, sell or trade.</h1>
         <p className="text-lg text-slate-600">
-          Pro helps evaluate the market. Store Finder monitors supported retailers near you and only surfaces
-          store-level inventory that meets the evidence standard.
+          Pro shows how much to trust a price, what moved and why, and what a deal nets after real costs — with the evidence
+          behind every number.
         </p>
-        {preview && (
-          <div className="mx-auto mt-2 rounded-full bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-800 ring-1 ring-emerald-200">
-            Founding preview active — paid features are unlocked while billing is being configured.
-          </div>
-        )}
       </header>
 
-      <div className="mx-auto grid w-full max-w-6xl gap-5 lg:grid-cols-3">
-        <Plan
-          name="Pro"
-          price="$9.99/mo"
-          description="Market intelligence for buy, sell, grade and trade decisions."
-          features={[
-            'Market Confidence with transparent reasons',
-            'Deal Analyzer and break-even math',
-            'Unlimited watchlist and threshold alerts',
-            'Unlimited Master Set trackers + AI Set Advisor',
-            'Personal dashboard',
-            'Longer signal context and model outlook',
-          ]}
-          actions={
-            account?.isPro && account.billingConfigured ? (
-              <button type="button" className="btn w-full bg-pokemon-pokeblue text-white" disabled={working !== null} onClick={manage}>
-                {working === 'portal' ? 'Opening…' : 'Manage subscription'}
-              </button>
-            ) : account?.billingConfigured ? (
-              <div className="grid gap-2">
-                <button type="button" className="btn w-full bg-pokemon-pokeblue text-white" disabled={working !== null} onClick={() => goCheckout('monthly')}>
-                  {working === 'monthly' ? 'Opening…' : 'Choose monthly · $9.99'}
-                </button>
-                <button type="button" className="btn w-full bg-white text-pokemon-pokeblue ring-1 ring-pokemon-pokeblue" disabled={working !== null} onClick={() => goCheckout('annual')}>
-                  {working === 'annual' ? 'Opening…' : 'Choose annual · $79'}
-                </button>
-              </div>
-            ) : (
-              <Preview label="Pro preview enabled on this device" />
-            )
-          }
-        />
+      {checkoutState === 'success' && (
+        <p role="status" className="mx-auto max-w-xl rounded-lg bg-emerald-50 px-4 py-3 text-center text-sm text-emerald-900">
+          {hasPro ? 'You’re on Pro. Thanks for subscribing!' : 'Payment received. Pro unlocks as soon as Stripe confirms it — usually within a few seconds.'}
+        </p>
+      )}
+      {checkoutState === 'cancelled' && (
+        <p className="mx-auto max-w-xl rounded-lg bg-slate-50 px-4 py-3 text-center text-sm text-slate-700">Checkout was cancelled; nothing was charged.</p>
+      )}
 
-        <Plan
+      <div className="mx-auto grid w-full max-w-4xl gap-5 md:grid-cols-2">
+        <PlanCard name="Free" price="$0" cadence="" description="Prices, sets, market movers and a 3-card watchlist." features={['30-day price history', 'Market movers, sleepers and downtrends', 'Watch up to 3 cards']}>
+          {!signedIn && <SignInLink className="btn w-full bg-white text-pokemon-pokeblue ring-1 ring-pokemon-pokeblue">Create a free account</SignInLink>}
+        </PlanCard>
+        <PlanCard
           featured
-          name="Store Finder"
-          price="$4.99/mo"
-          description="Local Pokémon inventory monitoring built around accuracy rather than alert volume."
-          features={[
-            'Available in Stores account tab',
-            '5, 10, 25, 50 or 100 mile radius',
-            'Store-level availability only',
-            'Verification timestamp and evidence on every result',
-            'Confidence score and low-stock disclosure',
-            'Retailer coverage status instead of silent failures',
-          ]}
-          actions={
-            account?.hasStoreFinder && account.storeFinderBillingConfigured ? (
-              <button type="button" className="btn w-full bg-pokemon-pokeblue text-white" disabled={working !== null} onClick={manage}>
-                {working === 'portal' ? 'Opening…' : 'Manage subscription'}
-              </button>
-            ) : account?.storeFinderBillingConfigured ? (
-              <button type="button" className="btn w-full bg-pokemon-pokeblue text-white" disabled={working !== null} onClick={() => goCheckout('storefinder')}>
-                {working === 'storefinder' ? 'Opening…' : 'Add Store Finder · $4.99'}
-              </button>
-            ) : (
-              <Preview label="Store Finder preview enabled on this device" />
-            )
-          }
-        />
-
-        <Plan
-          name="Complete"
-          price="$12.99/mo"
-          description="Both TCG Signal Pro and Store Finder under one subscription."
-          features={[
-            'Everything in Pro',
-            'Everything in Store Finder',
-            'One billing plan',
-            'Best value for active collectors',
-          ]}
-          actions={
-            account?.plan === 'complete' && account.billingConfigured ? (
-              <button type="button" className="btn w-full bg-pokemon-pokeblue text-white" disabled={working !== null} onClick={manage}>
-                {working === 'portal' ? 'Opening…' : 'Manage subscription'}
-              </button>
-            ) : account?.billingConfigured ? (
-              <button type="button" className="btn w-full bg-pokemon-pokeblue text-white" disabled={working !== null} onClick={() => goCheckout('complete')}>
-                {working === 'complete' ? 'Opening…' : 'Choose Complete · $12.99'}
-              </button>
-            ) : (
-              <Preview label="Complete preview enabled on this device" />
-            )
-          }
-        />
+          name="Pro"
+          price={price(monthly)}
+          cadence="/month"
+          description={`or ${price(annual)}/year${annualSaving && annualSaving > 0 ? ` (save ${annualSaving}%)` : ''}. Cancel any time.`}
+          features={['Everything in Free', 'Unlimited watchlist with price, move and signal alerts', 'True Market confidence, verified comps and signals', 'Deal Analyzer and a year of history']}
+        >
+          <div className="grid gap-2">
+            {action('monthly', `Choose monthly · ${price(monthly)}`, hasPro)}
+            {!hasPro && action('annual', `Choose annual · ${price(annual)}`, false, true)}
+          </div>
+        </PlanCard>
       </div>
 
-      {error && <p className="mx-auto max-w-xl rounded-lg bg-red-50 px-4 py-3 text-center text-sm text-red-800">{error}</p>}
+      {error && <p role="alert" className="mx-auto max-w-xl rounded-lg bg-red-50 px-4 py-3 text-center text-sm text-red-800">{error}</p>}
 
-      <section className="mx-auto grid max-w-6xl gap-4 sm:grid-cols-3">
-        <Feature title="Accuracy before coverage" body="Retailers are added only after their store-level source is validated. An empty result is preferable to a false trip across town." />
-        <Feature title="Useful at the moment of purchase" body="Store Finder combines radius, distance, evidence, verification time and retailer links so a collector can act quickly." />
-        <Feature title="Independent service boundary" body="Inventory runs separately from pricing so release-day polling, retailer failures and scaling do not destabilize the core market API." />
+      <section className="mx-auto w-full max-w-4xl overflow-x-auto">
+        <table className="w-full min-w-[320px] text-left text-sm">
+          <caption className="sr-only">Free and Pro compared</caption>
+          <thead>
+            <tr className="border-b border-slate-200 text-slate-500">
+              <th scope="col" className="py-2 pr-2 font-semibold">Feature</th>
+              <th scope="col" className="w-24 py-2 text-center font-semibold">Free</th>
+              <th scope="col" className="w-24 py-2 text-center font-semibold">Pro</th>
+            </tr>
+          </thead>
+          <tbody>
+            {COMPARISON.map(([feature, free, pro]) => (
+              <tr key={feature} className="border-b border-slate-100">
+                <th scope="row" className="py-2 pr-2 font-normal text-slate-700">{feature}</th>
+                <td className="py-2 text-center text-slate-500">{free}</td>
+                <td className="py-2 text-center font-semibold text-emerald-700">{pro}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </section>
+
+      <section className="mx-auto grid w-full max-w-4xl gap-5 md:grid-cols-2">
+        <PlanCard name="Store Finder" price={price(plan('storefinder'))} cadence="/month" description="Local Pokémon inventory at supported retailers, with the evidence behind each result." features={['Store-level availability only', 'Verification time and source on every result']}>
+          {action('storefinder', `Add Store Finder · ${price(plan('storefinder'))}`, Boolean(account?.hasStoreFinder), true)}
+        </PlanCard>
+        <PlanCard name="Complete" price={price(plan('complete'))} cadence="/month" description="Pro and Store Finder together." features={['Everything in Pro', 'Everything in Store Finder']}>
+          {action('complete', `Choose Complete · ${price(plan('complete'))}`, account?.plan === 'complete', true)}
+        </PlanCard>
       </section>
 
       <p className="mx-auto max-w-3xl text-center text-xs leading-5 text-slate-500">
-        Store availability can change between verification and arrival. TCG Signal reports the source and time of each observation and never invents quantity.
+        Payments are processed by Stripe. TCG Signal describes market data; it is not financial advice and doesn’t guarantee
+        prices, sales or returns. Prices shown in {monthly?.currency ?? 'USD'}; taxes may apply.
       </p>
     </div>
   );
 }
 
-function Preview({ label }: { label: string }) {
-  return <div className="rounded-lg bg-emerald-50 px-4 py-3 text-center text-sm font-semibold text-emerald-800">{label}</div>;
-}
-
-function Plan({ name, price, description, features, actions, featured = false }: {
+function PlanCard({ name, price, cadence, description, features, featured = false, children }: {
   name: string;
   price: string;
+  cadence: string;
   description: string;
   features: string[];
-  actions?: React.ReactNode;
   featured?: boolean;
+  children?: React.ReactNode;
 }) {
   return (
     <section className={`panel grid content-start gap-5 p-6 ${featured ? 'border-pokemon-blue ring-2 ring-pokemon-blue/10' : ''}`}>
       <div>
         <p className="eyebrow">{name}</p>
-        <p className="mt-1 text-3xl font-bold text-slate-900">{price}</p>
+        <p className="mt-1 text-3xl font-bold text-slate-900">{price}<span className="text-base font-semibold text-slate-500">{cadence}</span></p>
         <p className="mt-2 text-sm text-slate-600">{description}</p>
       </div>
       <ul className="grid gap-2 text-sm text-slate-700">
         {features.map((feature) => <li key={feature} className="flex gap-2"><span className="font-bold text-emerald-700">✓</span><span>{feature}</span></li>)}
       </ul>
-      {actions}
+      {children}
     </section>
-  );
-}
-
-function Feature({ title, body }: { title: string; body: string }) {
-  return (
-    <div className="panel p-5">
-      <h2 className="text-lg">{title}</h2>
-      <p className="mt-2 text-sm leading-6 text-slate-600">{body}</p>
-    </div>
   );
 }

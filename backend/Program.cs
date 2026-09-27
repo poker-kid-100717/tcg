@@ -1,10 +1,15 @@
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Http.Resilience;
+using PokemonTCG.API.Accounts;
 using PokemonTCG.API.Data;
 using PokemonTCG.API.Pricing;
 using PokemonTCG.API.Pricing.Predictions;
+using PokemonTCG.API.Pricing.Tcgplayer;
+using PokemonTCG.API.Market;
+using PokemonTCG.API.Market.Providers;
 using PokemonTCG.API.Product;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -31,7 +36,7 @@ builder.Services.AddHealthChecks()
 // container is only reachable through that Worker, so trust those headers.
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
-    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto | ForwardedHeaders.XForwardedHost;
     options.KnownIPNetworks.Clear();
     options.KnownProxies.Clear();
 });
@@ -68,21 +73,48 @@ builder.Services.AddHttpClient<PokemonTcgClient>(client =>
     });
 builder.Services.AddHybridCache();
 
+// TCGplayer Developer API. Optional: with no keys configured the client is
+// registered but unused, and prices keep coming from the Pokémon TCG API
+// (which republishes TCGplayer's market prices daily).
+builder.Services.AddTcgplayerClient(builder.Configuration)
+    .AddStandardResilienceHandler(options =>
+    {
+        options.AttemptTimeout.Timeout = TimeSpan.FromSeconds(30);
+        options.CircuitBreaker.SamplingDuration = TimeSpan.FromMinutes(1);
+    });
+
+// The container sleeps and restarts, so the keys that protect session and
+// sign-in cookies live in Postgres rather than on its disk.
+builder.Services.AddDataProtection()
+    .SetApplicationName("tcg")
+    .PersistKeysToDbContext<AppDbContext>();
+
 builder.Services.AddSingleton(builder.Configuration.GetSection(SnapshotOptions.SectionName).Get<SnapshotOptions>() ?? new());
+builder.Services.AddScoped<TcgplayerPriceSync>();
+builder.Services.AddScoped<IMarketDataProvider, PokemonTcgMarketDataProvider>();
+builder.Services.AddScoped<IMarketDataProvider, TcgplayerMarketDataProvider>();
+builder.Services.Configure<EbayOptions>(builder.Configuration.GetSection(EbayOptions.SectionName));
+builder.Services.AddScoped<ICompProvider, EbayCompProvider>();
+builder.Services.AddScoped<ICompProvider, ScrydexCompProvider>();
+builder.Services.AddScoped<CompIngestionService>();
+builder.Services.AddScoped<MarketStatusService>();
+builder.Services.AddSingleton<SnapshotGate>();
+builder.Services.AddSingleton(builder.Configuration.GetSection(FreshnessOptions.SectionName).Get<FreshnessOptions>() ?? new());
 builder.Services.AddScoped<PriceSnapshotService>();
+builder.Services.AddScoped<CatalogReader>();
 builder.Services.AddScoped<PriceGuideService>();
 builder.Services.AddSingleton(builder.Configuration.GetSection(PredictionOptions.SectionName).Get<PredictionOptions>() ?? new());
 builder.Services.AddScoped<PredictionService>();
 
-// TCG Signal MVP: device-bound collector profiles, watchlists, explainable market
-// intelligence and optional Stripe subscriptions. Without Stripe configuration,
-// the app deliberately runs as a full-feature founding preview.
+// TCG Signal: accounts, watchlists and alerts, explainable market intelligence and
+// Stripe subscriptions. Entitlements come only from verified billing state: without
+// Stripe configured, everyone is on the free plan.
 var billingOptions = builder.Configuration.GetSection(BillingOptions.SectionName).Get<BillingOptions>() ?? new();
 builder.Services.AddSingleton(billingOptions);
 builder.Services.AddSingleton(new ProductStore(normalizedConnectionString));
 builder.Services.AddSingleton(new MasterSetStore(normalizedConnectionString));
 builder.Services.AddScoped<MasterSetService>();
-builder.Services.AddScoped<SessionService>();
+
 builder.Services.AddScoped<EntitlementService>();
 var scrydexOptions = builder.Configuration.GetSection(ScrydexOptions.SectionName).Get<ScrydexOptions>() ?? new();
 builder.Services.AddSingleton(scrydexOptions);
@@ -93,7 +125,19 @@ builder.Services.AddHttpClient<ScrydexClient>(client =>
 });
 builder.Services.AddScoped<MarketIntelligenceService>();
 builder.Services.AddScoped<AlertEvaluationService>();
+builder.Services.AddScoped<SignalCenterService>();
+// Fee presets: configured presets replace the defaults rather than being appended to them.
+var dealOptions = new DealOptions();
+if (builder.Configuration.GetSection($"{DealOptions.SectionName}:Presets").Get<List<FeePreset>>() is { Count: > 0 } presets) dealOptions.Presets = presets;
+builder.Services.AddSingleton(dealOptions);
+builder.Services.AddScoped<DealAnalyzerService>();
+builder.Services.AddSingleton(builder.Configuration.GetSection(AlertOptions.SectionName).Get<AlertOptions>() ?? new AlertOptions());
+builder.Services.AddScoped<INotificationSender, InAppNotificationSender>();
+builder.Services.AddScoped<PokemonTCG.API.Market.Intelligence.SignalRefreshService>();
 builder.Services.AddHttpClient<StripeBillingService>();
+
+// Accounts: OpenID Connect sign-in with a server-side session cookie, the RequirePro policy and rate limits.
+builder.AddTcgSignalAuth();
 
 var app = builder.Build();
 
@@ -111,9 +155,14 @@ if (app.Environment.IsDevelopment())
 // one origin through the Worker, and the Vite dev server proxies /api.
 app.UseForwardedHeaders();
 app.UseMiddleware<DatabaseReadinessMiddleware>();
+app.UseMiddleware<SameSiteRequestMiddleware>();
+app.UseAuthentication();
+app.UseRateLimiter();
+app.UseAuthorization();
 
 app.MapPriceGuide();
 app.MapPredictions();
+app.MapAuth();
 app.MapProduct();
 app.MapHealthChecks("/health");
 app.MapHealthChecks("/health/live", new HealthCheckOptions { Predicate = _ => false });

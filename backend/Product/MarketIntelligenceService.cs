@@ -1,14 +1,28 @@
 using Microsoft.EntityFrameworkCore;
 using PokemonTCG.API.Data;
+using PokemonTCG.API.Market;
+using PokemonTCG.API.Market.Intelligence;
+using PokemonTCG.API.Market.Providers;
 using PokemonTCG.API.Pricing;
 
 namespace PokemonTCG.API.Product;
 
+/// <summary>
+/// Builds the Pro Market Intelligence view for a printing from the recorded market reference prices (or Scrydex's
+/// history when it's configured) plus verified sold comps, using the deterministic confidence, liquidity and signal
+/// models in Market/Intelligence. Scrydex comps are stored in market_observations with provenance, so they're
+/// deduplicated and kept apart by printing, grade and grading company.
+/// </summary>
 public sealed class MarketIntelligenceService(
     AppDbContext db,
     ScrydexClient scrydex,
-    TimeProvider clock)
+    CompIngestionService comps,
+    FreshnessOptions freshness,
+    TimeProvider clock,
+    ILogger<MarketIntelligenceService> logger)
 {
+    private const int HistoryDays = 120;
+
     public async Task<MarketIntelligenceView?> GetAsync(string cardId, string? requestedVariant, CancellationToken cancellationToken)
     {
         var latestDate = await db.PriceSnapshots.AsNoTracking()
@@ -25,184 +39,125 @@ public sealed class MarketIntelligenceService(
                 .Select(s => s.Variant)
                 .FirstOrDefaultAsync(cancellationToken);
         }
-        if (string.IsNullOrWhiteSpace(variant)) return null;
+        if (string.IsNullOrWhiteSpace(variant) || variant.Length > 40) return null;
 
-        var since = latestDate.Value.AddDays(-90);
-        var localRows = await db.PriceSnapshots.AsNoTracking()
+        var since = latestDate.Value.AddDays(-HistoryDays);
+        var local = await db.PriceSnapshots.AsNoTracking()
             .Where(s => s.CardId == cardId && s.Variant == variant && s.Date >= since && s.Market != null)
             .OrderBy(s => s.Date)
-            .Select(s => new IntelligencePoint(s.Date, s.Market!.Value, s.Low, s.Mid, s.High))
+            .Select(s => new { s.Date, s.Market, s.Low, s.Mid, s.High, s.Provider })
             .ToListAsync(cancellationToken);
-        if (localRows.Count == 0) return null;
+        if (local.Count == 0) return null;
 
-        var provider = await scrydex.GetMarketDataAsync(cardId, variant, 90, cancellationToken);
-        var providerRows = provider?.History
-            .Where(p => p.Market > 0)
-            .Select(p => new IntelligencePoint(p.Date, p.Market, p.Low, null, null))
-            .OrderBy(p => p.Date)
-            .ToList() ?? [];
+        var now = clock.GetUtcNow();
+        var today = DateOnly.FromDateTime(now.UtcDateTime);
 
-        var rows = providerRows.Count >= 2 ? providerRows : localRows;
-        var latest = rows[^1];
-
-        // Local TCGplayer snapshots may include mid/high values that Scrydex price-history
-        // intentionally does not. Only use them when the selected market reference is local,
-        // avoiding a misleading mixed-source spread.
-        var usingScrydex = providerRows.Count >= 2;
-        var low = latest.Low;
-        var mid = usingScrydex ? null : latest.Mid;
-        var high = usingScrydex ? null : latest.High;
-
-        var change7 = ChangeFrom(rows, latest.Date.AddDays(-7), latest.Market);
-        var change30 = ChangeFrom(rows, latest.Date.AddDays(-30), latest.Market);
-        var volatility = Volatility(rows);
-        decimal? spread = !usingScrydex && low is { } lowValue && high is { } highValue && latest.Market > 0
-            ? Math.Round((highValue - lowValue) / latest.Market * 100m, 1)
-            : null;
-
-        var today = DateOnly.FromDateTime(clock.GetUtcNow().UtcDateTime);
-        var rawComps = provider?.SoldComps
-            .Where(c => c.IsRaw && c.Currency.Equals("USD", StringComparison.OrdinalIgnoreCase))
-            .OrderByDescending(c => c.SoldAt)
-            .ToList() ?? [];
-        var rawComps30 = rawComps.Where(c => c.SoldAt >= today.AddDays(-30)).ToList();
-        var medianSold30 = Median(rawComps30.Select(c => c.Price));
-        var lastComp = rawComps.FirstOrDefault();
-
-        var ageDays = Math.Max(0, today.DayNumber - latest.Date.DayNumber);
-        var isStale = ageDays > 2;
-
-        var score = 10;
-        score += Math.Min(25, rows.Count);
-        score += ageDays switch { <= 1 => 20, <= 3 => 12, <= 7 => 5, _ => 0 };
-
-        if (rows.Count >= 3 && volatility is { } vol)
+        // Scrydex, when configured, supplies the reference history and verified sold listings.
+        ScrydexMarketData? provider = null;
+        if (scrydex.IsConfigured)
         {
-            score += vol switch { <= 3m => 20, <= 8m => 15, <= 15m => 9, <= 25m => 4, _ => 0 };
-        }
-
-        if (usingScrydex) score += 10;
-
-        if (rawComps30.Count > 0)
-        {
-            score += rawComps30.Count switch { >= 20 => 15, >= 10 => 12, >= 5 => 9, >= 2 => 5, _ => 2 };
-            if (medianSold30 is { } median && latest.Market > 0)
+            provider = await scrydex.GetMarketDataAsync(cardId, variant, 90, cancellationToken);
+            if (provider is not null)
             {
-                var disagreement = Math.Abs(median / latest.Market - 1m) * 100m;
-                score += disagreement switch { <= 5m => 10, <= 10m => 7, <= 20m => 3, _ => 0 };
+                try
+                {
+                    var request = new CompRequest(cardId, variant, null);
+                    await comps.StoreAsync(MarketProvider.Scrydex, provider.SoldComps.Select(c => ScrydexCompProvider.ToRecord(request, c)).ToList(), cancellationToken);
+                }
+                catch (DbUpdateException ex)
+                {
+                    logger.LogWarning(ex, "Couldn't store Scrydex comps for {Card}", cardId);
+                }
             }
         }
-        else if (spread is { } spreadValue)
+
+        var usingScrydex = provider is { History.Count: >= 2 };
+        var series = usingScrydex
+            ? new PriceSeries(provider!.History.Select(p => new PricePointDay(p.Date, p.Market, p.Low)))
+            : new PriceSeries(local.Select(p => new PricePointDay(p.Date, p.Market, p.Low, p.Mid, p.High)));
+        var referenceProvider = usingScrydex ? MarketProvider.Scrydex : local[^1].Provider;
+        var referenceName = usingScrydex ? "Scrydex" : referenceProvider == MarketProvider.TCGPlayer ? "TCGplayer API" : "Pokémon TCG API (TCGplayer market prices)";
+        var latestLocal = local[^1];
+        var metrics = MarketMetrics.From(series, today);
+
+        // Verified sales: raw, USD, this exact printing, from the stored comps.
+        var compSource = scrydex.IsConfigured ? "Scrydex sold listings" : null;
+        List<(DateTimeOffset SoldAt, decimal Price)>? sales = null;
+        List<MarketObservation> recent = [];
+        if (compSource is not null)
         {
-            score += spreadValue switch { <= 15m => 8, <= 30m => 5, <= 60m => 2, _ => 0 };
+            var from = now.AddDays(-90);
+            recent = await db.MarketObservations.AsNoTracking()
+                .Where(o => o.CardId == cardId && o.Variant == variant && o.Kind == ObservationKind.Sale && o.Provider == MarketProvider.Scrydex
+                            && o.Grade == null && o.GradingCompany == null && o.Language == "en" && o.Currency == "USD" && o.ObservedAt >= from)
+                .OrderByDescending(o => o.ObservedAt)
+                .ToListAsync(cancellationToken);
+            sales = recent.Select(o => (o.ObservedAt, o.Price)).ToList();
         }
+        var liquidity = Liquidity.Compute(sales, now, referenceName, compSource);
+        var sold30 = recent.Where(o => o.ObservedAt >= now.AddDays(-30)).Select(o => (double)o.Price).ToList();
+        decimal? medianSold = Stats.Median(sold30) is { } m ? Math.Round((decimal)m, 2) : null;
 
-        score = Math.Clamp(score, 0, 100);
-        var band = score switch
-        {
-            >= 80 => "High",
-            >= 60 => "Medium",
-            >= 35 => "Low",
-            _ => "Insufficient data",
-        };
+        var quotes = medianSold is { } median && sold30.Count >= 3
+            ? new List<MarketConfidence.SourceQuote> { new("Verified sales", median) }
+            : [];
+        var confidence = MarketConfidence.Compute(metrics, quotes, referenceName);
+        var signals = Signals.Evaluate(series, metrics, confidence.Score);
+        var fresh = freshness.Of(metrics.AsOf, today);
 
-        var (liquidity, liquidityReason) = Liquidity(rawComps30.Count, scrydex.IsConfigured);
+        var verified = compSource is null
+            ? VerifiedCompsView.None("No sold-comp source is connected, so there are no verified sales for this card.")
+            : new VerifiedCompsView(true, compSource,
+                sold30.Count == 0 ? "No matching raw sales in the last 30 days." : $"{sold30.Count} raw sales in the last 30 days.",
+                sold30.Count, medianSold, recent.FirstOrDefault()?.Price, recent.FirstOrDefault() is { } last ? DateOnly.FromDateTime(last.ObservedAt.UtcDateTime) : null,
+                liquidity.MedianDaysBetweenSales);
 
-        var reasons = new List<string>
-        {
-            $"{rows.Count} daily market observations are available for this printing.",
-            ageDays <= 1 ? "The latest market observation is current." : $"The latest market observation is {ageDays} days old.",
-        };
-        if (usingScrydex)
-            reasons.Add("Scrydex is supplying the primary raw Near Mint market history for this view.");
-        if (rawComps30.Count > 0)
-            reasons.Add($"{rawComps30.Count} raw sold listings were observed in the last 30 days; the median was {medianSold30:C}.");
-        else if (scrydex.IsConfigured)
-            reasons.Add("No matching raw sold listings were returned for the last 30 days.");
-        if (volatility is { } v)
-            reasons.Add($"Observed day-to-day market volatility is {v:0.0}% over the available window.");
-        if (spread is { } s)
-            reasons.Add($"The current local low-to-high listing spread is {s:0.0}% of market price.");
+        decimal? D(double? value, int digits = 1) => value is null ? null : Math.Round((decimal)value.Value, digits);
+        var reasons = confidence.Factors.Select(f => f.Detail).ToList();
 
         return new MarketIntelligenceView(
             cardId,
             variant,
             Prices.VariantLabel(variant),
-            usingScrydex
-                ? "Scrydex raw NM pricing and historical sold listings"
-                : "TCGplayer pricing via Pokémon TCG API snapshots",
-            latest.Date,
-            latest.Market,
-            low,
-            mid,
-            high,
-            change7,
-            change30,
-            volatility,
-            spread,
-            rows.Count,
-            score,
-            band,
-            isStale,
-            liquidity,
-            liquidityReason,
-            scrydex.IsConfigured ? rawComps30.Count : null,
-            medianSold30,
-            lastComp?.Price,
-            lastComp?.SoldAt,
-            rawComps.Take(5)
-                .Select(c => new SoldCompView(c.Id, c.Source, c.Title, c.Price, c.SoldAt, c.Url))
-                .ToList(),
-            reasons);
-    }
-
-    private static decimal? ChangeFrom(IReadOnlyList<IntelligencePoint> rows, DateOnly target, decimal current)
-    {
-        var baseline = rows.LastOrDefault(r => r.Date <= target);
-        return baseline is null || baseline.Market <= 0
-            ? null
-            : Math.Round((current / baseline.Market - 1m) * 100m, 1);
-    }
-
-    private static decimal? Volatility(IReadOnlyList<IntelligencePoint> rows)
-    {
-        if (rows.Count < 3) return null;
-        var returns = new List<double>();
-        for (var i = 1; i < rows.Count; i++)
+            usingScrydex ? "Scrydex market history and sold listings" : $"{referenceName} market reference prices (daily snapshots)",
+            metrics.AsOf ?? latestLocal.Date,
+            metrics.Market,
+            metrics.Low,
+            metrics.Mid,
+            metrics.High,
+            D(metrics.Change7),
+            D(metrics.Change30),
+            D(metrics.Volatility30),
+            metrics.Low is { } low && metrics.High is { } high && metrics.Market is > 0 ? Math.Round((high - low) / metrics.Market.Value * 100m, 1) : null,
+            metrics.Observations30,
+            confidence.Score,
+            confidence.Band switch { ConfidenceBand.High => "High", ConfidenceBand.Medium => "Medium", ConfidenceBand.Low => "Low", _ => "Insufficient data" },
+            fresh.State is FreshnessState.Stale or FreshnessState.NoData,
+            liquidity.Status == LiquidityStatus.VeryActive ? "Very active" : liquidity.Status.ToString(),
+            liquidity.Explanation,
+            liquidity.Sales30,
+            medianSold,
+            recent.FirstOrDefault()?.Price,
+            recent.FirstOrDefault() is { } lastSale ? DateOnly.FromDateTime(lastSale.ObservedAt.UtcDateTime) : null,
+            recent.Take(5).Select(o => new SoldCompView(o.ProviderReference ?? o.Id.ToString(), o.Provider.ToString(), null, o.Price,
+                DateOnly.FromDateTime(o.ObservedAt.UtcDateTime), o.SourceUrl)).ToList(),
+            reasons)
         {
-            if (rows[i - 1].Market <= 0) continue;
-            returns.Add((double)(rows[i].Market / rows[i - 1].Market - 1m) * 100d);
-        }
-        if (returns.Count < 2) return null;
-        var average = returns.Average();
-        var variance = returns.Sum(x => Math.Pow(x - average, 2)) / (returns.Count - 1);
-        return Math.Round((decimal)Math.Sqrt(variance), 1);
-    }
-
-    private static decimal? Median(IEnumerable<decimal> values)
-    {
-        var sorted = values.Order().ToArray();
-        if (sorted.Length == 0) return null;
-        var middle = sorted.Length / 2;
-        return sorted.Length % 2 == 1
-            ? sorted[middle]
-            : Math.Round((sorted[middle - 1] + sorted[middle]) / 2m, 2);
-    }
-
-    private static (string Status, string Reason) Liquidity(int sold30, bool providerConfigured)
-    {
-        if (!providerConfigured)
-            return ("Unknown", "Sold-listing data is not configured, so liquidity is intentionally not estimated.");
-
-        return sold30 switch
-        {
-            >= 30 => ("Very active", $"{sold30} raw sold listings were observed in the last 30 days."),
-            >= 10 => ("Active", $"{sold30} raw sold listings were observed in the last 30 days."),
-            >= 3 => ("Moderate", $"{sold30} raw sold listings were observed in the last 30 days."),
-            >= 1 => ("Thin", $"Only {sold30} raw sold listing{(sold30 == 1 ? "" : "s")} was observed in the last 30 days."),
-            _ => ("Thin", "No matching raw sold listings were observed in the last 30 days."),
+            ConfidenceExplanation = confidence.Explanation,
+            ConfidenceFactors = confidence.Factors,
+            ReferenceProvider = referenceProvider,
+            Freshness = fresh,
+            VolatilityLevel = MarketConfidence.Describe(metrics.Volatility),
+            Change90Percent = D(metrics.Change90),
+            BelowHigh30Percent = D(metrics.BelowHigh30),
+            LowVsMarketPercent = D(metrics.LowVsMarket),
+            High30 = metrics.High30,
+            Low30 = metrics.Low30,
+            VerifiedComps = verified,
+            LiquidityDetail = liquidity,
+            Signals = signals,
+            WhyMoving = WhyMoving.Explain(metrics, signals),
+            History = series.Points.Select(p => new ReferencePoint(p.Date, p.Market!.Value, p.Low)).ToList(),
         };
     }
-
-    private sealed record IntelligencePoint(DateOnly Date, decimal Market, decimal? Low, decimal? Mid, decimal? High);
 }

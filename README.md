@@ -60,6 +60,8 @@ flowchart LR
     CORE --> TCG
     CORE --> SCRY
     CORE --> STRIPE
+    CORE -->|OIDC code + PKCE| IDP[OpenID Connect provider]
+    STRIPE -->|Signed webhooks| CORE
     INV --> BB
 ```
 
@@ -69,7 +71,7 @@ flowchart LR
 |---|---|---|
 | React SPA | User experience, client routing, query state, presentation | Secrets, authorization decisions, persistence |
 | Cloudflare Worker | TLS edge, static assets, API routing, Store Finder entitlement gate, Workers AI orchestration, cron dispatch | Core business rules, durable application state |
-| Core API | Pricing, market intelligence, sessions, subscriptions, watchlists, alerts, master sets, predictions | Retail inventory provider behavior |
+| Core API | Pricing, market intelligence, signals, OIDC sign-in and sessions, subscriptions, deal analysis, watchlists, alerts, master sets, predictions | Retail inventory provider behavior |
 | Inventory.Service | Retailer adapters, evidence rules, distance filtering, provider health, short-lived observations | User identity, billing state, market pricing |
 | PostgreSQL | Durable application state | Compute |
 | External providers | Catalog, market enrichment, billing, retailer inventory | TCG Signal authorization or product policy |
@@ -180,12 +182,14 @@ sequenceDiagram
     participant D as PostgreSQL
 
     B->>W: POST /api/inventory/nearby<br/>lat, lng, radius
-    W->>C: POST /api/session
-    C->>D: Resolve device user + entitlement
+    W->>C: GET /api/me (session cookie)
+    C->>D: Resolve signed-in user + entitlement
     D-->>C: Account state
-    C-->>W: hasStoreFinder
+    C-->>W: signedIn, hasStoreFinder
 
-    alt not entitled
+    alt not signed in
+        W-->>B: 401 sign_in_required
+    else not entitled
         W-->>B: 403 Store Finder required
     else entitled
         W->>I: Forward inventory request
@@ -442,7 +446,9 @@ flowchart LR
     C1[11:15 UTC Cron] --> S[/internal/snapshots]
     S --> P[PriceSnapshotService]
     P --> DB[(PostgreSQL)]
-    P --> A[Evaluate watchlist alerts]
+    P --> SG[SignalRefreshService<br/>store the day's signals]
+    SG --> A[AlertEvaluationService<br/>edge-triggered rules, cooldown,<br/>Pro accounts only]
+    A --> N[INotificationSender<br/>in-app alert feed]
 
     C2[11:45 UTC Cron] --> M[/internal/predictions]
     M --> T[PredictionService]
@@ -497,27 +503,68 @@ This makes model quality observable instead of treating every successful trainin
 
 ---
 
-## 10. Market Intelligence
+## 10. Market Intelligence (TCG Signal Pro)
 
-Market Intelligence combines local historical state with optional enrichment.
+Everything in this section is deterministic arithmetic over recorded data — no LLM produces a score, a signal or an explanation — and is covered by unit tests (`backend.Tests/MarketIntelligenceModelTests.cs`). The models live in `backend/Market/Intelligence/`.
 
-The service can expose:
+### Free vs Pro
 
-- current market reference
-- 7-day / 30-day change
-- volatility
-- freshness
-- provenance
-- confidence score and band
-- deterministic explanation
-- sold comps when an enrichment provider is configured
-- liquidity state when supported by evidence
+| | Free | Pro |
+|---|---|---|
+| Prices, sets, search, 30-day history, market movers/sleepers/downtrends | ✓ | ✓ |
+| Watchlist | 3 printings, no alerts | Unlimited, with price/move/signal alerts |
+| True Market panel (confidence, liquidity, verified comps, signals, why-moving) | — | ✓ |
+| Signal center (`/signals`) | — | ✓ |
+| Deal Analyzer | — | ✓ |
+| Price history | 30 days | up to 365 days |
 
-### Confidence philosophy
+Pro is **$9.99/month or $79/year**; display prices and the Stripe price IDs are configuration (`Billing:*`), not code. Pro is enforced on the server by the `RequirePro` authorization policy; the UI's locked states are presentation only.
 
-Confidence is deterministic and explainable. It is not an LLM-generated score.
+### Market reference vs verified sold comps
 
-Unknown provider data stays unknown. The application does not infer transaction volume or liquidity from unrelated fields.
+A **market reference** is a provider's computed price (TCGplayer market price via the Pokémon TCG API, or the TCGplayer API when keys are set). A **verified sold comp** is an individual completed sale from a licensed source (Scrydex when configured). They are stored and shown separately: references in `price_snapshots`, comps in `market_observations` (kind `Sold`, deduplicated by provider reference). Reference prices are never presented as sales, and no comp is ever manufactured, estimated or scraped. `EbayCompProvider` exists only as a permanently disabled placeholder until licensed access exists.
+
+### Market Confidence (0–100)
+
+Starts at 100 and subtracts documented penalties, each shown to the user with its reason:
+
+| Factor | Penalty |
+|---|---|
+| Recency — price age (1–3 days, 4–7, 8–14) | 5 / 15 / 30 |
+| Observations — prices recorded in 30 days (<20, <10) | 10 / 20 |
+| Volatility — daily-move σ (Moderate, High, Very high) | 5 / 15 / 25 |
+| Listing spread — lowest listing far below market | up to 15 |
+| 30-day range | up to 10 |
+| Outlier days (5×MAD or >50% daily move) | 5 each, max 15 |
+| Short history (<30 days) | 10 |
+| Source disagreement (a second source differs >15%) | up to 15 |
+
+Bands: **High** ≥ 75, **Medium** ≥ 50, **Low** below 50, and **Insufficient data** (no score) when there is no market price, the price is older than 14 days, or fewer than 5 prices were recorded in 30 days. The explanation is one generated sentence naming the band and the biggest factors.
+
+### Liquidity
+
+`Unknown` unless verified sold comps exist — it is never inferred from listing counts or reference prices. With comps: `Thin` (<3 sales in 30 days), `Moderate`, `Active`, `Very Active` (≥ 1 sale/day), with sales in 7/30/90 days, median days between sales, last sale and price dispersion; each metric stays null when unknown.
+
+### Signals
+
+Evaluated for every printing ≥ $2 after each daily snapshot (`SignalRefreshService`) and stored in `market_signals`, so the signal center, the dashboard and signal alerts all read the same computation. Each carries its name, value, unit, lookback, reason, as-of date and the printing's confidence.
+
+| Signal | Rule |
+|---|---|
+| Momentum | +10% or more over 7 days and up over 30 |
+| Acceleration | 7-day change ≥ 8 points above the 30-day pace (≥ 20 prices) |
+| Unusual move | latest daily move ≥ 3σ of the previous 30 (≥ 15 moves) |
+| Volatility expansion | σ of the last 7 daily moves ≥ 2× the 30 before |
+| New 30-day high / low | latest price outside every price of the previous 29 days (≥ 20 prices) |
+| Thin supply | lowest listing 25%–300% above the market reference |
+| Sleeper | lowest listing 10%–200% above market while the market moved < 15% in 30 days |
+| Sustained downtrend | 30-day log-price fit slopes down, r² ≥ 0.6, ≥ 5 prices, ≥ 10% drop |
+
+**Why is this moving?** assembles 1–4 sentences from the same numbers (7/30-day change, distance from the 30-day high, listing moves, fired signals) and says plainly when there is too little history to explain anything.
+
+### Freshness
+
+Every price surface carries `Fresh` (≤ 1 day), `Aging` (≤ 3 days), `Stale` or `No data`, from `Freshness:*` configuration. Stale data caps confidence and is labelled wherever it appears.
 
 ---
 
@@ -559,70 +606,52 @@ Inventory.Service consumes the provider through `IInventoryProvider`; retailer-s
 
 ## 12. Identity and authorization
 
-The current identity model is intentionally lightweight.
+### Sign-in (OpenID Connect)
 
-### Device session
+Accounts come from any standards-based OpenID Connect provider (Auth0, Microsoft Entra External ID, Okta, Keycloak, Google…). The Core API runs the **authorization-code flow with PKCE** itself (`/api/auth/login` → provider → `/api/auth/callback`) and issues its own session cookie, so:
 
-A first-party device session is created using:
+- the browser never holds provider tokens (they are not saved), and TCG Signal stores no passwords;
+- the session cookie `tcg_auth` is HttpOnly, SameSite=Lax, Secure in production, 30-day sliding, and encrypted with ASP.NET Data Protection keys persisted in PostgreSQL (so container restarts don't sign people out);
+- users are keyed by provider issuer + subject; only the email and display name are kept;
+- return URLs are local paths only (`/dashboard`), so sign-in can't be used as an open redirect;
+- a device profile from the earlier anonymous MVP is linked to the account on first sign-in.
 
-- cryptographically random 256-bit token
-- SHA-256 token hash persisted in PostgreSQL
-- HttpOnly cookie
-- Secure cookie over HTTPS
-- SameSite=Lax
-- 180-day expiration
+`Auth:LocalLogin` (email-only sign-in) exists for local development and automated tests. Startup **throws** if it is enabled outside the Development or Testing environments.
 
-The raw token is never stored in the database.
+Account deletion (`DELETE /api/account`) cancels any Stripe subscription immediately, deletes the user and everything that cascades from it (watchlist, alerts, rule state, master sets, subscription row), and signs out.
 
 ### Authorization
 
-Collector-owned resources are scoped by resolved user ID.
-
-Examples:
-
-- watchlist mutations
-- alert reads
-- dashboard data
-- master sets
-- subscription state
+- The whole `/api` product group requires a signed-in user; the user id always comes from the session, never from request input, so one account cannot reach another's watchlist, alerts or master sets (tests cover this).
+- Pro features use the `RequirePro` policy. Anonymous requests get `401 {type: "sign_in_required"}`; free accounts get `403 {type: "pro_required"}`. The frontend uses those types to show a sign-in prompt or a locked state.
+- **CSRF:** state-changing `/api` requests must be JSON or carry `X-Requested-With`, and a browser `Origin` must be this site. The Stripe webhook is exempt (it is authenticated by signature). The Worker applies the same rule to the one POST it answers itself (the AI advisor).
+- **Rate limits** (per user, or per client IP before sign-in): sign-in 20 per 5 minutes, billing 10 per minute, tools such as the Deal Analyzer 120 per minute; configurable under `RateLimits:*`.
 
 ### Entitlements
 
-Core API calculates:
+`EntitlementService` derives access only from the subscription state stored from verified Stripe webhooks:
 
-- Pro access
-- Store Finder access
-- current plan / status
+| Status | Access |
+|---|---|
+| `active`, `trialing` | granted |
+| `past_due` | granted while Stripe retries, with a "payment issue" notice |
+| `unpaid`, `canceled`, `incomplete`, `incomplete_expired`, `paused` | not granted |
 
-The Worker calls the Core API before forwarding inventory coordinates.
-
-### MVP limitation
-
-Device-bound identity is not a substitute for production multi-device authentication.
-
-The intended evolution is OIDC-based account identity with migration of the existing device profile into the authenticated account.
+Plans `monthly`, `annual` and `complete` grant Pro; `storefinder` and `complete` grant Store Finder. Without Stripe configured, everyone is on the free plan — there is no preview mode.
 
 ---
 
 ## 13. Billing behavior
 
-Stripe is optional by design.
+Stripe Checkout, the Customer Portal and webhooks, over Stripe's HTTP API (`StripeBillingService`):
 
-When required Stripe settings are present:
+- `POST /api/billing/checkout {plan}` (signed in, rate-limited) returns a Checkout URL. Success and cancel URLs are built from `Billing:SiteUrl`, never from request input. Landing on the success page grants nothing; the page polls until the webhook has confirmed payment.
+- `POST /api/billing/portal` opens the Customer Portal for the account's Stripe customer.
+- `GET /api/billing/subscription` reports plan, status, renewal date, cancel-at-period-end and payment issues.
+- `GET /api/billing/plans` (public) returns the configured display prices.
+- `POST /api/billing/webhook` verifies the `Stripe-Signature` HMAC (v1, 5-minute tolerance, constant-time compare) over the raw body, records the event id in `stripe_events` (a duplicate is acknowledged and skipped), and for every subscription-affecting event (`checkout.session.completed`, `customer.subscription.*`, `invoice.payment_failed`, `invoice.paid`) **re-reads the subscription from Stripe** and stores that. Because the stored state is always Stripe's current state, out-of-order or late events can't grant or restore access. A processing failure forgets the event so Stripe's retry is processed.
 
-- Checkout creates a subscription flow.
-- Webhooks update backend subscription state.
-- Customer Portal manages subscription lifecycle.
-- Entitlements are derived from backend state.
-
-Recognized active subscription states include:
-
-- `active`
-- `trialing`
-
-When Stripe is not configured, the application enters **Founding Preview** mode so product workflows remain testable without fake checkout state.
-
-Store Finder and Pro are modeled as separate entitlements; a combined plan can grant both.
+Tests run against a fake Stripe (`backend.Tests/FakeStripeApi.cs`) — no live Stripe calls anywhere in CI.
 
 ---
 
@@ -716,6 +745,12 @@ Optional provider/billing secrets:
 | `STRIPE_PRO_ANNUAL_PRICE_ID` | Pro annual plan |
 | `STRIPE_STORE_FINDER_MONTHLY_PRICE_ID` | Store Finder plan |
 | `STRIPE_COMPLETE_MONTHLY_PRICE_ID` | Combined plan |
+| `AUTH_AUTHORITY` | OIDC issuer URL (sign-in is off without it) |
+| `AUTH_CLIENT_ID` | OIDC client id |
+| `AUTH_CLIENT_SECRET` | OIDC client secret |
+| `TCGPLAYER_PUBLIC_KEY` / `TCGPLAYER_PRIVATE_KEY` | TCGplayer Developer API (optional price source) |
+
+`AUTH_PROVIDER_NAME` (the sign-in button label) is a repository *variable*, not a secret. CI never needs any of these: tests use fakes for every provider.
 
 ### Security controls
 
@@ -723,6 +758,9 @@ Optional provider/billing secrets:
 - Stripe webhook signatures are verified server-side.
 - Stripe redirects do not authorize access.
 - Internal scheduled endpoints are not publicly routed.
+- Sessions are HttpOnly cookies; no tokens in URLs or browser storage.
+- Pro access is decided by the server on every request (`RequirePro`), never by the client.
+- CSRF protection, local-only return URLs and per-user rate limits on sign-in, billing and tools.
 - User-owned records are scoped by server-resolved user ID.
 - Precise user geolocation is not persisted by Inventory.Service.
 - Containers are disposable and do not own durable state.
@@ -730,13 +768,9 @@ Optional provider/billing secrets:
 
 ### Known security follow-up
 
-Before broad consumer launch:
-
-- replace device identity with OIDC
-- add explicit account recovery and multi-device semantics
-- formalize rate limits
-- add abuse controls for high-cost provider/AI endpoints
-- rotate any credential that was ever committed to repository history
+- Add email or push delivery as further `INotificationSender`s (alerts are in-app today).
+- Consider a distributed rate limiter if the API ever runs more than one instance.
+- Rotate any credential that was ever committed to repository history; never reuse one from history.
 
 ---
 
@@ -808,14 +842,22 @@ Representative routes:
 | GET | `/api/sets/{id}` | Core | Set detail |
 | GET | `/api/cards/{id}` | Core | Card detail + price history |
 | GET | `/api/cards?q=` | Core | Search |
-| GET | `/api/cards/{id}/intelligence` | Core | Market Intelligence |
+| GET | `/api/cards/{id}/intelligence` | Core | True Market (Pro) |
+| GET | `/api/cards/{id}/history?days=` | Core | Up to 365 days of history (Pro) |
+| GET | `/api/signals` | Core | Signal center (Pro) |
+| GET | `/api/deals/presets` | Core | Configured selling-fee presets |
+| POST | `/api/deals/analyze` | Core | Deal Analyzer (Pro, rate-limited) |
 | GET | `/api/market/movers` | Core | Market movers |
 | GET | `/api/market/downtrend` | Core | Downtrend signal |
 | GET | `/api/market/sleepers` | Core | Supply-gap signal |
 | GET | `/api/predictions` | Core | Published predictions |
 | GET | `/api/predictions/model` | Core | Validation / model status |
-| POST | `/api/session` | Core | Resolve/create device identity |
-| GET/POST | `/api/watchlist` | Core | Watchlist workflows |
+| GET | `/api/auth/options` | Core | Which sign-in methods are available |
+| GET | `/api/auth/login?returnUrl=` | Core | Start OIDC sign-in (PKCE) |
+| POST | `/api/auth/logout` | Core | Sign out |
+| GET | `/api/me` | Core | Who is signed in, plan and entitlements |
+| DELETE | `/api/account` | Core | Delete account (cancels billing) |
+| GET/POST/PUT/DELETE | `/api/watchlist` | Core | Watchlist (3 free; alerts Pro) |
 | GET | `/api/alerts` | Core | In-app alerts |
 | GET | `/api/dashboard` | Core | Personalized dashboard |
 | GET/POST | `/api/master-sets` | Core | Master-set workflows |
@@ -823,6 +865,8 @@ Representative routes:
 | POST | `/api/inventory/nearby` | Inventory | Entitled local inventory |
 | POST | `/api/billing/checkout` | Core | Stripe Checkout |
 | POST | `/api/billing/portal` | Core | Stripe Customer Portal |
+| GET | `/api/billing/subscription` | Core | Plan, status, renewal, payment issues |
+| GET | `/api/billing/plans` | Core | Public display prices |
 | POST | `/api/billing/webhook` | Core | Signed Stripe events |
 | GET | `/health` | Core | Readiness |
 | GET | `/health/live` | Core | Liveness |
@@ -929,6 +973,29 @@ Scrydex__ApiKey
 Scrydex__TeamId
 ```
 
+Sign-in (OpenID Connect; register `https://<site>/api/auth/callback` as the redirect URI):
+
+```text
+Auth__Authority
+Auth__ClientId
+Auth__ClientSecret
+Auth__ProviderName
+Auth__LocalLogin=true   # Development only; refused at startup elsewhere
+```
+
+Pricing, alerts and deals (all optional, with defaults):
+
+```text
+Billing__ProMonthlyPrice=9.99
+Billing__ProAnnualPrice=79
+Billing__Currency=USD
+Alerts__CooldownHours=24
+Deals__Presets__0__Id / Name / PercentFee / FixedFee / Note   # replaces the default presets
+Freshness__FreshDays=1
+Freshness__AgingDays=3
+RateLimits__AuthPerFiveMinutes / BillingPerMinute / ToolsPerMinute
+```
+
 Stripe:
 
 ```text
@@ -1008,9 +1075,11 @@ Database-level blast radius remains shared until databases are physically separa
 
 ---
 
-### ADR-004 — Device identity before full OIDC
+### ADR-004 — Device identity before full OIDC (superseded)
 
-**Decision:** use a secure first-party device token for the MVP.
+**Superseded by TCG Signal Pro:** accounts now use OpenID Connect with a server-side session (section 12); existing device profiles are linked on first sign-in.
+
+**Original decision:** use a secure first-party device token for the MVP.
 
 **Why**
 
@@ -1060,10 +1129,9 @@ These are known architectural limitations rather than accidental omissions.
 ### Near term
 
 - Pokémon TCG API remains a compatibility dependency and should continue moving behind replaceable provider contracts.
-- Device identity needs OIDC before a broad multi-device launch.
 - Inventory needs more validated retailer sources.
 - Inventory database ownership is logical, not yet physically isolated.
-- High-cost AI/provider routes need formal rate limiting before substantial public traffic.
+- Rate limits are per API instance (in memory); a distributed limiter is needed if the API scales out.
 - Email/push alert delivery is not yet part of the alert pipeline.
 - Production dashboards/alerts should be added around provider degradation, cron failures, database readiness, and container cold-start latency.
 
