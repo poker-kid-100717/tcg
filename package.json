@@ -10,10 +10,10 @@
     "deploy": "npm run build:frontend && wrangler deploy"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^5.20260923.1",
+    "@cloudflare/workers-types": "^5.20260929.1",
     "typescript": "^7.0.2",
-    "vitest": "^5.0.1",
-    "wrangler": "^4.136.3"
+    "vitest": "^5.0.2",
+    "wrangler": "^4.144.0"
   },
   "dependencies": {
     "@cloudflare/containers": "^0.3.7"
