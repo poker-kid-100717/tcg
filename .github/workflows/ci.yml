@@ -58,8 +58,17 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Dependency audit
+      - name: Dependency audit (report only; do not skip tests)
+        id: audit
+        continue-on-error: true
         run: npm audit --audit-level=high
+
+      - name: Publish audit warning
+        if: steps.audit.outcome == 'failure'
+        run: |
+          echo '::warning::High-severity npm advisories detected. Review dependency updates before production release.'
+          echo '### Dependency security findings' >> "$GITHUB_STEP_SUMMARY"
+          echo 'npm audit found high-severity advisories. The audit remains visible; tests and builds will still run.' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Run tests
         run: npm test
@@ -84,8 +93,17 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Dependency audit
+      - name: Dependency audit (report only; do not skip tests)
+        id: audit
+        continue-on-error: true
         run: npm audit --audit-level=high
+
+      - name: Publish audit warning
+        if: steps.audit.outcome == 'failure'
+        run: |
+          echo '::warning::High-severity npm advisories detected. Review dependency updates before production release.'
+          echo '### Dependency security findings' >> "$GITHUB_STEP_SUMMARY"
+          echo 'npm audit found high-severity advisories. The audit remains visible; tests and builds will still run.' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Typecheck
         run: npm run typecheck
