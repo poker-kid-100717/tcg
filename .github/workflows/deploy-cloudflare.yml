@@ -89,7 +89,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          SITE="https://tcg-portfolio-sample.app"
+          SITE="${{ steps.deploy.outputs.deployment-url }}"
 
           fetch_until() {
             url="$1"
