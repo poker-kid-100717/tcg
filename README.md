@@ -100,6 +100,16 @@ flowchart TB
     W --> D2 --> C2 --> DB
 ```
 
+### Cloudflare build and deploy
+
+Both deployment paths use the same Wrangler configuration:
+
+- **Cloudflare Workers Builds (Git integration):** Set the root directory to the repository root and use the default deploy command `npx wrangler deploy`. The `build.command` in `wrangler.jsonc` installs frontend dependencies with `npm ci --prefix frontend` and compiles React with `npm run build:frontend` before Wrangler uploads `frontend/dist`. No separate dashboard build command is required.
+- **GitHub Actions:** `.github/workflows/deploy-cloudflare.yml` runs its own install and frontend build for an explicit CI gate; Wrangler's build hook also ensures the output exists when deploying. This intentionally favors a reliable deployment over avoiding a repeated build.
+- **Local deployment:** Run `npm ci` at the repository root, then `npm run deploy`. Wrangler handles the frontend installation/build via its configured build hook.
+
+Do not replace `assets.directory` with an empty or different directory to silence a missing-assets error. A missing `frontend/dist` is a build failure, not an asset-path mismatch.
+
 ### Current scaling posture
 
 This is an MVP/early-product topology, not a claim of unlimited scale.
