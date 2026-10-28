@@ -2,6 +2,12 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "tcg",
   "main": "worker/index.ts",
+  // Wrangler runs this before deploying, including Cloudflare Git builds that
+  // invoke `npx wrangler deploy` without a separate dashboard build command.
+  // The output must exist before Wrangler reads assets.directory below.
+  "build": {
+    "command": "npm ci --prefix frontend && npm run build:frontend"
+  },
   "compatibility_date": "2026-09-25",
   "workers_dev": true,
   "routes": [
