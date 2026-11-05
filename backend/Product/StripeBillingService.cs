@@ -145,9 +145,10 @@ public sealed class StripeBillingService(
         var plan = Metadata(obj, "plan") ?? "monthly";
         var email = obj.TryGetProperty("customer_details", out var details) ? GetString(details, "email") : null;
 
+        // Checkout completion alone does not prove payment succeeded.
+        // Subscription lifecycle events determine entitlement state.
         await store.SetEmailAsync(userId, email, cancellationToken);
-        await store.UpsertSubscriptionAsync(
-            userId, customer, subscription, plan, "active", null, false, clock.GetUtcNow(), cancellationToken);
+        logger.LogInformation("Stripe checkout completed for user {UserId}; awaiting subscription state", userId);
     }
 
     private async Task HandleSubscriptionAsync(JsonElement obj, CancellationToken cancellationToken)
