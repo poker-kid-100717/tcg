@@ -77,7 +77,7 @@ export default function AvailableInStoresPage() {
   if (session.isPending) return <Loading label="Loading your account…" />;
   if (session.error) return <ErrorState error={session.error} onRetry={() => session.refetch()} />;
 
-  if (!session.data.hasStoreFinder) {
+  if (!session.data?.hasStoreFinder) {
     return (
       <div className="container-custom py-10">
         <section className="panel mx-auto grid max-w-2xl gap-4 p-7 text-center">

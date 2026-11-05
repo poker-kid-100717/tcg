@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom';
 
-import { useMarketStatus, useSession } from '../api/hooks';
+import { useMarketStatus, useMe, useSession } from '../api/hooks';
 import { formatDate } from '../lib/format';
 
 function SearchForm({ className = '' }: { className?: string }) {
@@ -34,12 +34,23 @@ function SearchForm({ className = '' }: { className?: string }) {
   );
 }
 
+/** Primary navigation. Signals, Outlook and Master Sets are linked from Market and the dashboard. */
+const NAV: [string, string][] = [
+  ['/', 'Home'],
+  ['/sets', 'Sets'],
+  ['/market', 'Market'],
+  ['/watchlist', 'Watchlist'],
+  ['/deal', 'Deal Analyzer'],
+  ['/dashboard', 'Dashboard'],
+];
+
 const navClass = ({ isActive }: { isActive: boolean }) =>
-  `rounded-md px-3 py-1.5 text-sm font-semibold transition ${isActive ? 'bg-white/15 text-white' : 'text-white/75 hover:text-white'}`;
+  `shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-sm font-semibold transition ${isActive ? 'bg-white/15 text-white' : 'text-white/75 hover:text-white'}`;
 
 export function Layout() {
   const status = useMarketStatus();
   const session = useSession();
+  const me = useMe();
   return (
     <div className="flex min-h-screen flex-col">
       <a href="#main" className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:rounded focus:bg-white focus:px-3 focus:py-2">
@@ -53,41 +64,31 @@ export function Layout() {
             </span>
             TCG Signal
           </Link>
-          <nav aria-label="Main" className="flex items-center gap-1">
-            <NavLink to="/sets" className={navClass}>
-              Sets
-            </NavLink>
-            <NavLink to="/market" className={navClass}>
-              Market
-            </NavLink>
-            <NavLink to="/outlook" className={navClass}>
-              Outlook
-            </NavLink>
-            <NavLink to="/deal" className={navClass}>
-              Deal
-            </NavLink>
-            <NavLink to="/watchlist" className={navClass}>
-              Watchlist
-            </NavLink>
-            <NavLink to="/master-sets" className={navClass}>
-              Master Sets
-            </NavLink>
-            <NavLink to="/dashboard" className={navClass}>
-              Dashboard
-            </NavLink>
+          <nav aria-label="Main" className="-mx-1 flex max-w-full items-center gap-1 overflow-x-auto">
+            {NAV.map(([to, label]) => (
+              <NavLink key={to} to={to} end={to === '/'} className={navClass}>
+                {label}
+              </NavLink>
+            ))}
             {session.data?.hasStoreFinder && (
               <NavLink to="/available-in-stores" className={navClass}>
-                Available in Stores
+                Stores
               </NavLink>
             )}
           </nav>
           <SearchForm className="order-last w-full lg:order-none lg:ml-auto lg:w-64" />
-          <Link
-            to="/pro"
-            className="rounded-full bg-pokemon-yellow px-3 py-1.5 text-xs font-extrabold text-pokemon-pokeblue"
-          >
-            {session.data?.isPro ? (session.data.billingConfigured ? 'PRO' : 'PRO PREVIEW') : 'GET PRO'}
-          </Link>
+          <div className="flex items-center gap-2">
+            {session.data?.isPro ? (
+              <span className="rounded-full bg-pokemon-yellow px-2.5 py-1 text-[11px] font-extrabold text-pokemon-pokeblue">PRO</span>
+            ) : (
+              <Link to="/pro" className="rounded-full bg-pokemon-yellow px-3 py-1.5 text-xs font-extrabold text-pokemon-pokeblue">
+                Get Pro
+              </Link>
+            )}
+            <NavLink to="/account" className={navClass}>
+              {me.data?.signedIn ? 'Account' : 'Sign in'}
+            </NavLink>
+          </div>
         </div>
       </header>
 
@@ -100,11 +101,16 @@ export function Layout() {
           <p>
             TCG Signal uses TCGplayer pricing via the Pokémon TCG API
             {status.data?.lastSnapshotAt ? `, last recorded ${formatDate(status.data.lastSnapshotAt, 'short')}` : ''}.
-            Not affiliated with Nintendo, The Pokémon Company or TCGplayer.
+            Market data, not financial advice. Not affiliated with Nintendo, The Pokémon Company or TCGplayer.
           </p>
-          <a href="https://github.com/poker-kid-100717/tcg" className="font-semibold hover:text-slate-900">
-            Source on GitHub
-          </a>
+          <nav aria-label="More" className="flex flex-wrap gap-4 font-semibold">
+            <Link to="/signals" className="hover:text-slate-900">Signals</Link>
+            <Link to="/outlook" className="hover:text-slate-900">Outlook</Link>
+            <Link to="/master-sets" className="hover:text-slate-900">Master Sets</Link>
+            <Link to="/pro" className="hover:text-slate-900">Pricing</Link>
+            <Link to="/about" className="hover:text-slate-900">Methodology</Link>
+            <a href="https://github.com/poker-kid-100717/tcg" className="hover:text-slate-900">Source</a>
+          </nav>
         </div>
       </footer>
     </div>

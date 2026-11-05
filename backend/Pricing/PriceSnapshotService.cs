@@ -1,7 +1,10 @@
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using NpgsqlTypes;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using PokemonTCG.API.Data;
+using PokemonTCG.API.Market.Providers;
 
 namespace PokemonTCG.API.Pricing;
 
@@ -19,6 +22,12 @@ public class SnapshotOptions
     public int PageDelayMilliseconds { get; set; } = 250;
 }
 
+/// <summary>One snapshot run at a time per API instance; a second trigger while one is running is refused.</summary>
+public sealed class SnapshotGate
+{
+    public SemaphoreSlim Semaphore { get; } = new(1, 1);
+}
+
 public record SnapshotResult(int RunId, SnapshotStatus Status, int CardsSeen, int PricesWritten, string? Error);
 
 /// <summary>
@@ -29,25 +38,26 @@ public record SnapshotResult(int RunId, SnapshotStatus Status, int CardsSeen, in
 /// overwrites that day's rows instead of duplicating them.
 /// </summary>
 public class PriceSnapshotService(
-    PokemonTcgClient client,
+    SnapshotGate gate,
+    IEnumerable<IMarketDataProvider> providers,
     AppDbContext db,
     SnapshotOptions options,
     TimeProvider clock,
     ILogger<PriceSnapshotService> logger)
 {
-    // One run at a time per process; a second trigger while one is running is refused.
-    private static readonly SemaphoreSlim Gate = new(1, 1);
+    public static readonly JsonSerializerOptions ProviderJson = new(JsonSerializerDefaults.Web) { Converters = { new JsonStringEnumConverter() } };
+
 
     public async Task<SnapshotResult?> RunAsync(CancellationToken cancellationToken)
     {
-        if (!await Gate.WaitAsync(0, cancellationToken)) return null;
+        if (!await gate.Semaphore.WaitAsync(0, cancellationToken)) return null;
         try
         {
             return await RunExclusiveAsync(cancellationToken);
         }
         finally
         {
-            Gate.Release();
+            gate.Semaphore.Release();
         }
     }
 
@@ -63,17 +73,42 @@ public class PriceSnapshotService(
             // (the price model and movers would otherwise read it as a complete one).
             await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
             var today = DateOnly.FromDateTime(clock.GetUtcNow().UtcDateTime);
-            for (var page = 1; ; page++)
+            var statuses = new List<ProviderRunStatus>();
+
+            // The primary provider fills the catalog and the day's reference prices. If it fails, the run fails and
+            // nothing is recorded: yesterday's prices stay, marked with their own date, rather than a partial day.
+            var ordered = providers.OrderBy(p => p.Role).ToList();
+            var primary = ordered.FirstOrDefault(p => p.Role == ProviderRole.Primary && p.IsEnabled)
+                ?? throw new InvalidOperationException("No primary market data provider is enabled.");
+            var primaryResult = await primary.IngestAsync(today, cancellationToken);
+            run.CardsSeen = primaryResult.CardsSeen;
+            run.PricesWritten = primaryResult.PricesWritten;
+            statuses.Add(new ProviderRunStatus(primary.Id, ProviderRunStatus.Succeeded, primaryResult.PricesWritten, null));
+
+            // Overlays refine the day's prices. One that fails is rolled back to a savepoint and reported; the primary
+            // provider's prices stand under the primary provider's name, never relabelled as the overlay's.
+            foreach (var overlay in ordered.Where(p => p.Role == ProviderRole.Overlay))
             {
-                var response = await client.GetAllCardsPageAsync(page, cancellationToken);
-                if (response.Data.Count == 0) break;
-
-                run.CardsSeen += response.Data.Count;
-                run.PricesWritten += await WritePageAsync(response.Data, today, cancellationToken);
-
-                if (run.CardsSeen >= response.TotalCount) break;
-                await Task.Delay(options.PageDelayMilliseconds, cancellationToken);
+                if (!overlay.IsEnabled)
+                {
+                    statuses.Add(new ProviderRunStatus(overlay.Id, ProviderRunStatus.Disabled, 0, null));
+                    continue;
+                }
+                await transaction.CreateSavepointAsync("overlay", cancellationToken);
+                try
+                {
+                    var result = await overlay.IngestAsync(today, cancellationToken);
+                    run.PricesWritten += result.PricesWritten;
+                    statuses.Add(new ProviderRunStatus(overlay.Id, ProviderRunStatus.Succeeded, result.PricesWritten, null));
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    await transaction.RollbackToSavepointAsync("overlay", cancellationToken);
+                    logger.LogWarning(ex, "Market data provider {Provider} failed; its prices were not recorded", overlay.Id);
+                    statuses.Add(new ProviderRunStatus(overlay.Id, ProviderRunStatus.Failed, 0, "The provider didn't respond as expected."));
+                }
             }
+            run.ProviderResults = JsonSerializer.Serialize(statuses, ProviderJson);
 
             var cutoff = today.AddDays(-options.RetentionDays);
             await db.PriceSnapshots.Where(s => s.Date < cutoff).ExecuteDeleteAsync(cancellationToken);
@@ -101,85 +136,4 @@ public class PriceSnapshotService(
             run.Id, run.Status, run.CardsSeen, run.PricesWritten);
         return new SnapshotResult(run.Id, run.Status, run.CardsSeen, run.PricesWritten, run.Error);
     }
-
-    private async Task<int> WritePageAsync(IReadOnlyList<TcgCard> cards, DateOnly today, CancellationToken cancellationToken)
-    {
-        var priced = cards.Where(c => c.Tcgplayer?.Prices is { Count: > 0 }).ToList();
-        var rows = (
-            from card in priced
-            from price in card.Tcgplayer!.Prices!
-            where price.Value.Market >= options.MinMarketPrice
-            // Every row is dated the day it was recorded, not the upstream update date: each successful run is then a
-            // complete day of prices, so day-to-day history, returns and per-day aggregates are over every printing.
-            select (card, variant: price.Key, price: price.Value, date: today)
-        ).ToList();
-        if (rows.Count == 0) return 0;
-
-        var tracked = rows.Select(r => r.card).DistinctBy(c => c.Id).ToList();
-
-        await db.Database.ExecuteSqlRawAsync(
-            """
-            INSERT INTO cards (id, name, number, set_id, set_name, rarity, image_small, tcgplayer_url,
-                               supertype, subtypes, national_dex, artist, set_series, set_released, set_printed_total)
-            SELECT id, name, number, set_id, set_name, rarity, image_small, tcgplayer_url,
-                   supertype, string_to_array(subtypes, '|'), national_dex, artist, set_series, set_released, set_printed_total
-            FROM unnest(@ids, @names, @numbers, @set_ids, @set_names, @rarities, @images, @urls,
-                        @supertypes, @subtypes, @dex, @artists, @series, @released, @printed)
-                AS t(id, name, number, set_id, set_name, rarity, image_small, tcgplayer_url,
-                     supertype, subtypes, national_dex, artist, set_series, set_released, set_printed_total)
-            ON CONFLICT (id) DO UPDATE SET
-                name = excluded.name, number = excluded.number, set_id = excluded.set_id,
-                set_name = excluded.set_name, rarity = excluded.rarity,
-                image_small = excluded.image_small, tcgplayer_url = excluded.tcgplayer_url,
-                supertype = excluded.supertype, subtypes = excluded.subtypes, national_dex = excluded.national_dex,
-                artist = excluded.artist, set_series = excluded.set_series, set_released = excluded.set_released,
-                set_printed_total = excluded.set_printed_total
-            """,
-            [
-                Text("ids", tracked.Select(c => c.Id)),
-                Text("names", tracked.Select(c => c.Name)),
-                Text("numbers", tracked.Select(c => c.Number)),
-                Text("set_ids", tracked.Select(c => c.Set.Id)),
-                Text("set_names", tracked.Select(c => c.Set.Name)),
-                Text("rarities", tracked.Select(c => c.Rarity)),
-                Text("images", tracked.Select(c => c.Images?.Small)),
-                Text("urls", tracked.Select(c => c.Tcgplayer?.Url)),
-                Text("supertypes", tracked.Select(c => c.Supertype)),
-                // unnest can't take a jagged array, so subtypes travel as one delimited string per card.
-                Text("subtypes", tracked.Select(c => string.Join('|', c.Subtypes ?? []))),
-                new NpgsqlParameter("dex", NpgsqlDbType.Array | NpgsqlDbType.Integer)
-                    { Value = tracked.Select(c => c.NationalPokedexNumbers is [var first, ..] ? first : (int?)null).ToArray() },
-                Text("artists", tracked.Select(c => c.Artist)),
-                Text("series", tracked.Select(c => c.Set.Series)),
-                new NpgsqlParameter("released", NpgsqlDbType.Array | NpgsqlDbType.Date) { Value = tracked.Select(c => c.Set.Released).ToArray() },
-                new NpgsqlParameter("printed", NpgsqlDbType.Array | NpgsqlDbType.Integer) { Value = tracked.Select(c => (int?)c.Set.PrintedTotal).ToArray() },
-            ],
-            cancellationToken);
-
-        await db.Database.ExecuteSqlRawAsync(
-            """
-            INSERT INTO price_snapshots (card_id, variant, date, market, low, mid, high)
-            SELECT * FROM unnest(@card_ids, @variants, @dates, @markets, @lows, @mids, @highs)
-            ON CONFLICT (card_id, variant, date) DO UPDATE SET
-                market = excluded.market, low = excluded.low, mid = excluded.mid, high = excluded.high
-            """,
-            [
-                Text("card_ids", rows.Select(r => r.card.Id)),
-                Text("variants", rows.Select(r => r.variant)),
-                new NpgsqlParameter("dates", NpgsqlDbType.Array | NpgsqlDbType.Date) { Value = rows.Select(r => r.date).ToArray() },
-                Money("markets", rows.Select(r => r.price.Market)),
-                Money("lows", rows.Select(r => r.price.Low)),
-                Money("mids", rows.Select(r => r.price.Mid)),
-                Money("highs", rows.Select(r => r.price.High)),
-            ],
-            cancellationToken);
-
-        return rows.Count;
-    }
-
-    private static NpgsqlParameter Text(string name, IEnumerable<string?> values) =>
-        new(name, NpgsqlDbType.Array | NpgsqlDbType.Text) { Value = values.ToArray() };
-
-    private static NpgsqlParameter Money(string name, IEnumerable<decimal?> values) =>
-        new(name, NpgsqlDbType.Array | NpgsqlDbType.Numeric) { Value = values.ToArray() };
 }

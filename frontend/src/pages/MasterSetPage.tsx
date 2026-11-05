@@ -40,6 +40,8 @@ export default function MasterSetPage() {
       },
     });
 
+  // Pro watches start with a 10%-below target and a 10% move alert; free watches carry no alerts.
+  const isPro = Boolean(session.data?.isPro);
   const watchMissing = (item: MasterSetItem) =>
     watch.mutate({
       cardId: item.cardId,
@@ -47,9 +49,9 @@ export default function MasterSetPage() {
       cardName: item.cardName,
       setName: data.summary.setName,
       imageUrl: item.imageUrl,
-      targetBelow: item.currentMarketPrice ? Math.round(item.currentMarketPrice * 0.9 * 100) / 100 : null,
+      targetBelow: isPro && item.currentMarketPrice ? Math.round(item.currentMarketPrice * 0.9 * 100) / 100 : null,
       targetAbove: null,
-      movePercent: 10,
+      movePercent: isPro ? 10 : null,
     });
 
   return (

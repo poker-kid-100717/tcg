@@ -17,7 +17,7 @@ public class ProductApiTests(ApiFixture fixture)
     };
 
     [Fact]
-    public async Task Preview_session_watchlist_alert_dashboard_and_intelligence_work_end_to_end()
+    public async Task Pro_account_watchlist_alert_dashboard_and_intelligence_work_end_to_end()
     {
         var suffix = Guid.NewGuid().ToString("N")[..8];
         var cardId = $"sig-{suffix}";
@@ -49,14 +49,16 @@ public class ProductApiTests(ApiFixture fixture)
             await db.SaveChangesAsync();
         }
 
-        using var client = fixture.CreateClient();
+        var (client, userId) = await fixture.SignInAsync();
+        using var _ = client;
+        await fixture.GrantProAsync(userId);
 
-        var sessionResponse = await client.PostAsync("/api/session", null);
+        var sessionResponse = await client.GetAsync("/api/session");
         Assert.Equal(HttpStatusCode.OK, sessionResponse.StatusCode);
         var account = (await sessionResponse.Content.ReadFromJsonAsync<AccountView>(Json))!;
         Assert.True(account.IsPro);
-        Assert.False(account.BillingConfigured);
-        Assert.Equal("preview", account.Plan);
+        Assert.True(account.BillingConfigured);
+        Assert.Equal("monthly", account.Plan);
 
         var watchResponse = await client.PostAsJsonAsync("/api/watchlist", new CreateWatchlistRequest(
             cardId,
@@ -104,12 +106,15 @@ public class ProductApiTests(ApiFixture fixture)
 
         var intelligenceResponse = await client.GetAsync($"/api/cards/{cardId}/intelligence?variant=holofoil");
         Assert.Equal(HttpStatusCode.OK, intelligenceResponse.StatusCode);
-        var intelligence = (await intelligenceResponse.Content.ReadFromJsonAsync<MarketIntelligenceView>(Json))!;
-        Assert.Equal("Unknown", intelligence.Liquidity);
-        Assert.Null(intelligence.SoldComps30Days);
-        Assert.Empty(intelligence.RecentSoldComps);
-        Assert.Equal(8m, intelligence.Market);
-        Assert.Contains("TCGplayer", intelligence.Source);
+        var intelligence = await intelligenceResponse.Content.ReadFromJsonAsync<JsonElement>(Json);
+        Assert.Equal("Unknown", intelligence.GetProperty("liquidity").GetString());
+        Assert.Equal(JsonValueKind.Null, intelligence.GetProperty("soldComps30Days").ValueKind);
+        Assert.Equal(0, intelligence.GetProperty("recentSoldComps").GetArrayLength());
+        Assert.Equal(8m, intelligence.GetProperty("market").GetDecimal());
+        Assert.Contains("TCGplayer", intelligence.GetProperty("source").GetString());
+        // Two days of history is too little to be confident about, and the explanation says so.
+        Assert.Equal("Insufficient data", intelligence.GetProperty("confidenceBand").GetString());
+        Assert.False(string.IsNullOrWhiteSpace(intelligence.GetProperty("confidenceExplanation").GetString()));
 
         // Evaluating the same unchanged state again must not duplicate the crossing event.
         using (var scope = fixture.Factory.Services.CreateScope())

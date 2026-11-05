@@ -8,6 +8,8 @@ public sealed class ProductStore(string connectionString)
 {
     private readonly string _connectionString = connectionString;
 
+    public string ConnectionString => _connectionString;
+
     public sealed record UserRow(Guid Id, string? Email);
     public sealed record SubscriptionRow(
         Guid UserId,
@@ -27,7 +29,13 @@ public sealed class ProductStore(string connectionString)
         decimal? BaselinePrice,
         decimal? TargetBelow,
         decimal? TargetAbove,
-        decimal? MovePercent);
+        decimal? MovePercent,
+        bool AlertSleeper = false,
+        bool AlertTrendingDown = false,
+        bool AlertUnusualMove = false);
+
+    /// <summary>A rule's last evaluated state: whether its condition held, and when it last fired.</summary>
+    public sealed record RuleState(bool Active, DateTimeOffset? LastFiredAt);
 
     private async Task<NpgsqlConnection> OpenAsync(CancellationToken cancellationToken)
     {
@@ -125,15 +133,18 @@ public sealed class ProductStore(string connectionString)
         DateTimeOffset? currentPeriodEnd,
         bool cancelAtPeriodEnd,
         DateTimeOffset now,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        DateTimeOffset? stateAt = null)
     {
         await using var connection = await OpenAsync(cancellationToken);
+        // stateAt is when the state was true at Stripe. An older state never overwrites a newer one, so events that
+        // arrive out of order can't roll a subscription back.
         await using var command = new NpgsqlCommand(
             """
             INSERT INTO subscriptions
-                (user_id, stripe_customer_id, stripe_subscription_id, plan, status, current_period_end, cancel_at_period_end, updated_at)
+                (user_id, stripe_customer_id, stripe_subscription_id, plan, status, current_period_end, cancel_at_period_end, updated_at, last_event_at)
             VALUES
-                (@user, @customer, @sub, @plan, @status, @period, @cancel, @now)
+                (@user, @customer, @sub, @plan, @status, @period, @cancel, @now, @state_at)
             ON CONFLICT (user_id) DO UPDATE SET
                 stripe_customer_id = COALESCE(EXCLUDED.stripe_customer_id, subscriptions.stripe_customer_id),
                 stripe_subscription_id = COALESCE(EXCLUDED.stripe_subscription_id, subscriptions.stripe_subscription_id),
@@ -141,8 +152,11 @@ public sealed class ProductStore(string connectionString)
                 status = EXCLUDED.status,
                 current_period_end = COALESCE(EXCLUDED.current_period_end, subscriptions.current_period_end),
                 cancel_at_period_end = EXCLUDED.cancel_at_period_end,
-                updated_at = EXCLUDED.updated_at
+                updated_at = EXCLUDED.updated_at,
+                last_event_at = COALESCE(EXCLUDED.last_event_at, subscriptions.last_event_at)
+            WHERE subscriptions.last_event_at IS NULL OR EXCLUDED.last_event_at IS NULL OR EXCLUDED.last_event_at >= subscriptions.last_event_at
             """, connection);
+        command.Parameters.Add(new NpgsqlParameter("state_at", NpgsqlDbType.TimestampTz) { Value = stateAt is null ? DBNull.Value : stateAt.Value });
         command.Parameters.AddWithValue("user", userId);
         command.Parameters.Add(new NpgsqlParameter("customer", NpgsqlDbType.Text)
             { Value = string.IsNullOrWhiteSpace(customerId) ? DBNull.Value : customerId });
@@ -157,6 +171,31 @@ public sealed class ProductStore(string connectionString)
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
+    /// <summary>Records a Stripe event id. False when it was already recorded (a duplicate delivery).</summary>
+    public async Task<bool> TryRecordStripeEventAsync(string id, string type, DateTimeOffset createdAt, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command = new NpgsqlCommand(
+            """
+            INSERT INTO stripe_events (id, type, created_at, received_at) VALUES (@id, @type, @created, @now)
+            ON CONFLICT (id) DO NOTHING
+            """, connection);
+        command.Parameters.AddWithValue("id", id);
+        command.Parameters.AddWithValue("type", type.Length > 100 ? type[..100] : type);
+        command.Parameters.AddWithValue("created", createdAt);
+        command.Parameters.AddWithValue("now", now);
+        return await command.ExecuteNonQueryAsync(cancellationToken) == 1;
+    }
+
+    /// <summary>Forgets an event whose processing failed, so Stripe's retry is processed rather than skipped.</summary>
+    public async Task ForgetStripeEventAsync(string id, CancellationToken cancellationToken)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command = new NpgsqlCommand("DELETE FROM stripe_events WHERE id = @id", connection);
+        command.Parameters.AddWithValue("id", id);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
     public async Task<IReadOnlyList<WatchlistItemView>> GetWatchlistAsync(Guid userId, CancellationToken cancellationToken)
     {
         await using var connection = await OpenAsync(cancellationToken);
@@ -164,7 +203,7 @@ public sealed class ProductStore(string connectionString)
             """
             SELECT w.id, w.card_id, w.variant, w.card_name, w.set_name, w.image_url,
                    w.baseline_price, p.market, w.target_below, w.target_above, w.move_percent,
-                   w.enabled, w.created_at
+                   w.enabled, w.created_at, w.alert_sleeper, w.alert_trending_down, w.alert_unusual_move
             FROM watchlist_items w
             LEFT JOIN LATERAL (
                 SELECT s.market
@@ -195,7 +234,12 @@ public sealed class ProductStore(string connectionString)
                 DecimalOrNull(reader, 9),
                 DecimalOrNull(reader, 10),
                 reader.GetBoolean(11),
-                reader.GetFieldValue<DateTimeOffset>(12)));
+                reader.GetFieldValue<DateTimeOffset>(12))
+            {
+                AlertSleeper = reader.GetBoolean(13),
+                AlertTrendingDown = reader.GetBoolean(14),
+                AlertUnusualMove = reader.GetBoolean(15),
+            });
         }
         return items;
     }
@@ -220,10 +264,10 @@ public sealed class ProductStore(string connectionString)
             """
             INSERT INTO watchlist_items
                 (user_id, card_id, variant, card_name, set_name, image_url, baseline_price,
-                 target_below, target_above, move_percent, enabled, created_at)
+                 target_below, target_above, move_percent, alert_sleeper, alert_trending_down, alert_unusual_move, enabled, created_at)
             VALUES
                 (@user, @card, @variant, @name, @set, @image, @baseline,
-                 @below, @above, @move, true, @now)
+                 @below, @above, @move, @sleeper, @trend, @unusual, true, @now)
             ON CONFLICT (user_id, card_id, variant) DO UPDATE SET
                 card_name = EXCLUDED.card_name,
                 set_name = EXCLUDED.set_name,
@@ -232,6 +276,9 @@ public sealed class ProductStore(string connectionString)
                 target_below = EXCLUDED.target_below,
                 target_above = EXCLUDED.target_above,
                 move_percent = EXCLUDED.move_percent,
+                alert_sleeper = EXCLUDED.alert_sleeper,
+                alert_trending_down = EXCLUDED.alert_trending_down,
+                alert_unusual_move = EXCLUDED.alert_unusual_move,
                 enabled = true
             RETURNING id
             """, connection);
@@ -246,6 +293,9 @@ public sealed class ProductStore(string connectionString)
         AddDecimal(command, "below", request.TargetBelow);
         AddDecimal(command, "above", request.TargetAbove);
         AddDecimal(command, "move", request.MovePercent);
+        command.Parameters.AddWithValue("sleeper", request.AlertSleeper);
+        command.Parameters.AddWithValue("trend", request.AlertTrendingDown);
+        command.Parameters.AddWithValue("unusual", request.AlertUnusualMove);
         command.Parameters.AddWithValue("now", now);
         return Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken));
     }
@@ -260,7 +310,8 @@ public sealed class ProductStore(string connectionString)
         await using var command = new NpgsqlCommand(
             """
             UPDATE watchlist_items
-            SET target_below = @below, target_above = @above, move_percent = @move, enabled = @enabled
+            SET target_below = @below, target_above = @above, move_percent = @move, enabled = @enabled,
+                alert_sleeper = @sleeper, alert_trending_down = @trend, alert_unusual_move = @unusual
             WHERE id = @id AND user_id = @user
             """, connection);
         command.Parameters.AddWithValue("id", id);
@@ -269,6 +320,9 @@ public sealed class ProductStore(string connectionString)
         AddDecimal(command, "above", request.TargetAbove);
         AddDecimal(command, "move", request.MovePercent);
         command.Parameters.AddWithValue("enabled", request.Enabled);
+        command.Parameters.AddWithValue("sleeper", request.AlertSleeper);
+        command.Parameters.AddWithValue("trend", request.AlertTrendingDown);
+        command.Parameters.AddWithValue("unusual", request.AlertUnusualMove);
         return await command.ExecuteNonQueryAsync(cancellationToken) == 1;
     }
 
@@ -287,7 +341,8 @@ public sealed class ProductStore(string connectionString)
         await using var connection = await OpenAsync(cancellationToken);
         await using var command = new NpgsqlCommand(
             """
-            SELECT id, user_id, card_id, variant, card_name, baseline_price, target_below, target_above, move_percent
+            SELECT id, user_id, card_id, variant, card_name, baseline_price, target_below, target_above, move_percent,
+                   alert_sleeper, alert_trending_down, alert_unusual_move
             FROM watchlist_items WHERE enabled = true
             """, connection);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -303,9 +358,48 @@ public sealed class ProductStore(string connectionString)
                 DecimalOrNull(reader, 5),
                 DecimalOrNull(reader, 6),
                 DecimalOrNull(reader, 7),
-                DecimalOrNull(reader, 8)));
+                DecimalOrNull(reader, 8),
+                reader.GetBoolean(9),
+                reader.GetBoolean(10),
+                reader.GetBoolean(11)));
         }
         return items;
+    }
+
+    public async Task<Dictionary<(long Item, string Kind), RuleState>> GetRuleStatesAsync(CancellationToken cancellationToken)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command = new NpgsqlCommand("SELECT watchlist_item_id, kind, condition_active, last_fired_at FROM alert_rules", connection);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        var states = new Dictionary<(long, string), RuleState>();
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            states[(reader.GetInt64(0), reader.GetString(1))] = new RuleState(reader.GetBoolean(2),
+                reader.IsDBNull(3) ? null : reader.GetFieldValue<DateTimeOffset>(3));
+        }
+        return states;
+    }
+
+    public async Task SetRuleStateAsync(long watchlistItemId, string kind, bool active, DateTimeOffset? firedAt, DateOnly evaluatedOn, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command = new NpgsqlCommand(
+            """
+            INSERT INTO alert_rules (watchlist_item_id, kind, condition_active, last_fired_at, last_evaluated_on, updated_at)
+            VALUES (@item, @kind, @active, @fired, @on, @now)
+            ON CONFLICT (watchlist_item_id, kind) DO UPDATE SET
+                condition_active = EXCLUDED.condition_active,
+                last_fired_at = COALESCE(EXCLUDED.last_fired_at, alert_rules.last_fired_at),
+                last_evaluated_on = EXCLUDED.last_evaluated_on,
+                updated_at = EXCLUDED.updated_at
+            """, connection);
+        command.Parameters.AddWithValue("item", watchlistItemId);
+        command.Parameters.AddWithValue("kind", kind);
+        command.Parameters.AddWithValue("active", active);
+        command.Parameters.Add(new NpgsqlParameter("fired", NpgsqlDbType.TimestampTz) { Value = firedAt is null ? DBNull.Value : firedAt.Value });
+        command.Parameters.AddWithValue("on", evaluatedOn);
+        command.Parameters.AddWithValue("now", now);
+        await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
     public async Task<bool> AddAlertIfMissingAsync(

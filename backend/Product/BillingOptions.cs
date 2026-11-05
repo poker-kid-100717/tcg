@@ -10,7 +10,24 @@ public sealed class BillingOptions
     public string ProAnnualPriceId { get; set; } = "";
     public string StoreFinderMonthlyPriceId { get; set; } = "";
     public string CompleteMonthlyPriceId { get; set; } = "";
+    /// <summary>The public site. Checkout and portal return URLs are built from it, never from request input.</summary>
     public string SiteUrl { get; set; } = "https://tcg-portfolio-sample.app";
+
+    /// <summary>Display prices for the pricing page. Billing itself always uses the Stripe price IDs.</summary>
+    public decimal ProMonthlyPrice { get; set; } = 9.99m;
+    public decimal ProAnnualPrice { get; set; } = 79m;
+    public decimal StoreFinderMonthlyPrice { get; set; } = 4.99m;
+    public decimal CompleteMonthlyPrice { get; set; } = 12.99m;
+    public string Currency { get; set; } = "USD";
+
+    /// <summary>Which plan a Stripe price ID bills for, or null for a price this app doesn't sell.</summary>
+    public string? PlanForPrice(string? priceId) =>
+        string.IsNullOrWhiteSpace(priceId) ? null
+        : priceId == ProMonthlyPriceId ? "monthly"
+        : priceId == ProAnnualPriceId ? "annual"
+        : priceId == StoreFinderMonthlyPriceId ? "storefinder"
+        : priceId == CompleteMonthlyPriceId ? "complete"
+        : null;
 
     public bool StripeConfigured =>
         !string.IsNullOrWhiteSpace(StripeSecretKey) &&
@@ -26,40 +43,37 @@ public sealed class BillingOptions
         !string.IsNullOrWhiteSpace(StoreFinderMonthlyPriceId);
 }
 
+/// <summary>
+/// Entitlements come only from subscription state that Stripe webhooks have confirmed (and the webhook handler re-reads
+/// from Stripe). A checkout redirect never grants anything, and without billing configured nobody is Pro.
+/// </summary>
 public sealed class EntitlementService(ProductStore store, BillingOptions billing)
 {
+    /// <summary>Statuses that keep access: paid up, trialing, or a failed payment Stripe is still retrying.</summary>
+    private static readonly HashSet<string> Entitled = ["active", "trialing", "past_due"];
+
     public async Task<AccountView> GetAccountAsync(Guid userId, CancellationToken cancellationToken)
     {
         var subscription = await store.GetSubscriptionAsync(userId, cancellationToken);
-
-        // Until Stripe is configured, the production app runs as a founding preview:
-        // paid workflows can be exercised without fake checkout or fake stock data.
-        if (!billing.IsConfigured)
-        {
-            return new AccountView(
-                userId,
-                false,
-                false,
-                true,
-                true,
-                "preview",
-                null,
-                "Founding preview");
-        }
-
-        var active = subscription?.Status is "active" or "trialing";
-        var plan = active ? subscription!.Plan : "free";
-        var isPro = active && plan is "monthly" or "annual" or "complete";
-        var hasStoreFinder = active && plan is "storefinder" or "complete";
+        var entitled = subscription is not null && Entitled.Contains(subscription.Status);
+        var plan = entitled ? subscription!.Plan : "free";
+        var isPro = entitled && plan is "monthly" or "annual" or "complete";
+        var hasStoreFinder = entitled && plan is "storefinder" or "complete";
 
         return new AccountView(
             userId,
-            true,
+            billing.IsConfigured,
             billing.StoreFinderIsConfigured,
             isPro,
             hasStoreFinder,
             plan,
             subscription?.Status,
-            "Live billing");
+            billing.IsConfigured ? "Live billing" : "Billing not configured")
+        {
+            CurrentPeriodEnd = subscription?.CurrentPeriodEnd,
+            CancelAtPeriodEnd = subscription?.CancelAtPeriodEnd ?? false,
+            PaymentIssue = subscription?.Status is "past_due" or "unpaid",
+            CanManageBilling = billing.StripeConfigured && !string.IsNullOrWhiteSpace(subscription?.CustomerId),
+        };
     }
 }

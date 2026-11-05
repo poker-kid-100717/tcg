@@ -22,6 +22,25 @@ namespace PokemonTCG.API.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("Microsoft.AspNetCore.DataProtection.EntityFrameworkCore.DataProtectionKey", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("FriendlyName")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Xml")
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("data_protection_keys", (string)null);
+                });
+
             modelBuilder.Entity("PokemonTCG.API.Data.Card", b =>
                 {
                     b.Property<string>("Id")
@@ -33,6 +52,21 @@ namespace PokemonTCG.API.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)")
                         .HasColumnName("artist");
+
+                    b.Property<string>("FlavorText")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)")
+                        .HasColumnName("flavor_text");
+
+                    b.Property<string>("Hp")
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)")
+                        .HasColumnName("hp");
+
+                    b.Property<string>("ImageLarge")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("image_large");
 
                     b.Property<string>("ImageSmall")
                         .HasMaxLength(500)
@@ -95,16 +129,296 @@ namespace PokemonTCG.API.Migrations
                         .HasColumnType("character varying(40)")
                         .HasColumnName("supertype");
 
+                    b.Property<int?>("TcgplayerProductId")
+                        .HasColumnType("integer")
+                        .HasColumnName("tcgplayer_product_id");
+
                     b.Property<string>("TcgplayerUrl")
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)")
                         .HasColumnName("tcgplayer_url");
+
+                    b.PrimitiveCollection<string[]>("Types")
+                        .IsRequired()
+                        .HasColumnType("text[]")
+                        .HasColumnName("types");
 
                     b.HasKey("Id");
 
                     b.HasIndex("SetId");
 
                     b.ToTable("cards", (string)null);
+                });
+
+            modelBuilder.Entity("PokemonTCG.API.Data.CardSet", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("id");
+
+                    b.Property<string>("LogoUrl")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("logo_url");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("name");
+
+                    b.Property<int>("PrintedTotal")
+                        .HasColumnType("integer")
+                        .HasColumnName("printed_total");
+
+                    b.Property<DateOnly?>("ReleaseDate")
+                        .HasColumnType("date")
+                        .HasColumnName("release_date");
+
+                    b.Property<string>("Series")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("series");
+
+                    b.Property<string>("SymbolUrl")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("symbol_url");
+
+                    b.Property<int?>("TcgplayerGroupId")
+                        .HasColumnType("integer")
+                        .HasColumnName("tcgplayer_group_id");
+
+                    b.Property<int>("Total")
+                        .HasColumnType("integer")
+                        .HasColumnName("total");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("sets", (string)null);
+                });
+
+            modelBuilder.Entity("PokemonTCG.API.Data.LatestPrice", b =>
+                {
+                    b.Property<string>("CardId")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("card_id");
+
+                    b.Property<string>("Variant")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("variant");
+
+                    b.Property<decimal?>("High")
+                        .HasPrecision(12, 2)
+                        .HasColumnType("numeric(12,2)")
+                        .HasColumnName("high");
+
+                    b.Property<decimal?>("Low")
+                        .HasPrecision(12, 2)
+                        .HasColumnType("numeric(12,2)")
+                        .HasColumnName("low");
+
+                    b.Property<decimal?>("Market")
+                        .HasPrecision(12, 2)
+                        .HasColumnType("numeric(12,2)")
+                        .HasColumnName("market");
+
+                    b.Property<decimal?>("Mid")
+                        .HasPrecision(12, 2)
+                        .HasColumnType("numeric(12,2)")
+                        .HasColumnName("mid");
+
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
+                        .HasDefaultValue("PokemonTcg")
+                        .HasColumnName("provider");
+
+                    b.Property<DateOnly>("UpdatedOn")
+                        .HasColumnType("date")
+                        .HasColumnName("updated_on");
+
+                    b.HasKey("CardId", "Variant");
+
+                    b.ToTable("latest_prices", (string)null);
+                });
+
+            modelBuilder.Entity("PokemonTCG.API.Data.MarketObservation", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("CardId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("card_id");
+
+                    b.Property<string>("Condition")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("condition");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)")
+                        .HasColumnName("currency");
+
+                    b.Property<string>("DedupeKey")
+                        .IsRequired()
+                        .HasMaxLength(400)
+                        .HasColumnType("character varying(400)")
+                        .HasColumnName("dedupe_key");
+
+                    b.Property<decimal?>("Grade")
+                        .HasPrecision(3, 1)
+                        .HasColumnType("numeric(3,1)")
+                        .HasColumnName("grade");
+
+                    b.Property<string>("GradingCompany")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("grading_company");
+
+                    b.Property<DateTimeOffset>("IngestedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("ingested_at");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("kind");
+
+                    b.Property<string>("Language")
+                        .IsRequired()
+                        .HasMaxLength(8)
+                        .HasColumnType("character varying(8)")
+                        .HasColumnName("language");
+
+                    b.Property<DateTimeOffset>("ObservedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("observed_at");
+
+                    b.Property<decimal>("Price")
+                        .HasPrecision(12, 2)
+                        .HasColumnType("numeric(12,2)")
+                        .HasColumnName("price");
+
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
+                        .HasColumnName("provider");
+
+                    b.Property<string>("ProviderReference")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("provider_reference");
+
+                    b.Property<decimal?>("Shipping")
+                        .HasPrecision(12, 2)
+                        .HasColumnType("numeric(12,2)")
+                        .HasColumnName("shipping");
+
+                    b.Property<string>("SourceUrl")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)")
+                        .HasColumnName("source_url");
+
+                    b.Property<string>("Variant")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("variant");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DedupeKey")
+                        .IsUnique();
+
+                    b.HasIndex("CardId", "Variant", "Kind", "ObservedAt");
+
+                    b.ToTable("market_observations", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_market_observations_price", "price >= 0");
+                        });
+                });
+
+            modelBuilder.Entity("PokemonTCG.API.Data.MarketSignal", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<DateOnly>("AsOf")
+                        .HasColumnType("date")
+                        .HasColumnName("as_of");
+
+                    b.Property<string>("CardId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("card_id");
+
+                    b.Property<int>("Confidence")
+                        .HasColumnType("integer")
+                        .HasColumnName("confidence");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("kind");
+
+                    b.Property<int>("LookbackDays")
+                        .HasColumnType("integer")
+                        .HasColumnName("lookback_days");
+
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
+                        .HasColumnName("provider");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("reason");
+
+                    b.Property<double>("Value")
+                        .HasColumnType("double precision")
+                        .HasColumnName("value");
+
+                    b.Property<string>("Variant")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasColumnName("variant");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AsOf", "Kind");
+
+                    b.HasIndex("CardId", "Variant", "AsOf", "Kind")
+                        .IsUnique();
+
+                    b.ToTable("market_signals", (string)null);
                 });
 
             modelBuilder.Entity("PokemonTCG.API.Data.PredictionRun", b =>
@@ -292,6 +606,14 @@ namespace PokemonTCG.API.Migrations
                         .HasColumnType("numeric(12,2)")
                         .HasColumnName("mid");
 
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
+                        .HasDefaultValue("PokemonTcg")
+                        .HasColumnName("provider");
+
                     b.HasKey("CardId", "Variant", "Date");
 
                     b.HasIndex("Date");
@@ -325,6 +647,11 @@ namespace PokemonTCG.API.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("prices_written");
 
+                    b.Property<string>("ProviderResults")
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)")
+                        .HasColumnName("provider_results");
+
                     b.Property<DateTimeOffset>("StartedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("started_at");
@@ -338,6 +665,33 @@ namespace PokemonTCG.API.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("snapshot_runs", (string)null);
+                });
+
+            modelBuilder.Entity("PokemonTCG.API.Data.LatestPrice", b =>
+                {
+                    b.HasOne("PokemonTCG.API.Data.Card", null)
+                        .WithMany()
+                        .HasForeignKey("CardId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("PokemonTCG.API.Data.MarketObservation", b =>
+                {
+                    b.HasOne("PokemonTCG.API.Data.Card", null)
+                        .WithMany()
+                        .HasForeignKey("CardId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("PokemonTCG.API.Data.MarketSignal", b =>
+                {
+                    b.HasOne("PokemonTCG.API.Data.Card", null)
+                        .WithMany()
+                        .HasForeignKey("CardId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("PokemonTCG.API.Data.PricePrediction", b =>

@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.EntityFrameworkCore;
 using PokemonTCG.API.Data;
+using PokemonTCG.API.Market;
 using PokemonTCG.API.Product;
 
 namespace PokemonTCG.API.Pricing;
@@ -41,28 +42,25 @@ public static class PriceGuideEndpoints
         api.MapGet("/market/sleepers", (int? limit, decimal? minPrice, PriceGuideService guide, CancellationToken ct) =>
             guide.GetSleepersAsync(Math.Clamp(limit ?? 12, 1, 50), minPrice ?? 2m, 0.10m, ct));
 
-        api.MapGet("/market/status", async (AppDbContext db, CancellationToken ct) =>
-        {
-            var lastRun = await db.SnapshotRuns.AsNoTracking()
-                .Where(r => r.Status == SnapshotStatus.Succeeded)
-                .OrderByDescending(r => r.FinishedAt)
-                .Select(r => new { r.FinishedAt, r.CardsSeen, r.PricesWritten })
-                .FirstOrDefaultAsync(ct);
-            var days = await db.PriceSnapshots.Select(s => s.Date).Distinct().CountAsync(ct);
-            return new { LastSnapshotAt = lastRun?.FinishedAt, lastRun?.CardsSeen, lastRun?.PricesWritten, DaysOfHistory = days };
-        });
+        api.MapGet("/market/status", (MarketStatusService status, CancellationToken ct) => status.GetAsync(ct));
 
         // Not under /api: the Worker only forwards /api and /health from the
         // internet, so this is reachable from the Worker's Cron Trigger (and
         // locally), never from a browser.
         app.MapPost("/internal/snapshots", async Task<IResult> (
             PriceSnapshotService snapshots,
+            PokemonTCG.API.Market.Intelligence.SignalRefreshService signals,
             AlertEvaluationService alerts,
             CancellationToken ct) =>
         {
             var result = await snapshots.RunAsync(ct);
             if (result is null) return Results.Conflict(new { message = "A snapshot run is already in progress." });
-            if (result.Status == SnapshotStatus.Succeeded) await alerts.EvaluateAsync(ct);
+            if (result.Status == SnapshotStatus.Succeeded)
+            {
+                // Signals first: signal alerts read the day's stored signals.
+                await signals.RefreshAsync(ct);
+                await alerts.EvaluateAsync(ct);
+            }
             return Results.Ok(result);
         });
     }

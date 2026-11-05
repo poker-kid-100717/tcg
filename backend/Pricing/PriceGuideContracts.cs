@@ -1,3 +1,6 @@
+using PokemonTCG.API.Data;
+using PokemonTCG.API.Market;
+
 namespace PokemonTCG.API.Pricing;
 
 // Response shapes for the price guide API.
@@ -37,7 +40,10 @@ public record SetStats(int CardCount, int PricedCount, decimal TotalMarketValue,
 
 public record SetDetail(SetSummary Set, SetStats Stats, IReadOnlyList<CardSummary> Cards);
 
-public record VariantPrice(string Variant, string Label, decimal? Low, decimal? Mid, decimal? High, decimal? Market);
+/// <summary>A printing's current market reference prices. These are a provider's computed prices, not individual sales.</summary>
+public record VariantPrice(
+    string Variant, string Label, decimal? Low, decimal? Mid, decimal? High, decimal? Market,
+    MarketProvider? Provider = null, DateOnly? AsOf = null);
 
 public record PricePoint(DateOnly Date, string Variant, decimal? Market);
 
@@ -58,7 +64,15 @@ public record CardDetail(
     IReadOnlyList<VariantPrice> Prices,
     DateOnly? PricesUpdated,
     string? TcgplayerUrl,
-    IReadOnlyList<PricePoint> History);
+    IReadOnlyList<PricePoint> History)
+{
+    /// <summary>Which provider the current prices came from.</summary>
+    public MarketProvider? PriceProvider { get; init; }
+    /// <summary>How old the current prices are; stale prices are labelled, never presented as current.</summary>
+    public DataFreshness? Freshness { get; init; }
+    /// <summary>How many days of history <see cref="History"/> covers (longer history is a Pro feature).</summary>
+    public int HistoryDays { get; init; }
+}
 
 public record SearchResults(IReadOnlyList<CardSummary> Cards, int Page, int PageSize, int TotalCount);
 

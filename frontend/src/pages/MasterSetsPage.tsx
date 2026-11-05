@@ -1,20 +1,25 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 
-import { useCreateMasterSet, useMasterSets, useSets } from '../api/hooks';
+import { useCreateMasterSet, useMasterSets, useMe, useSets } from '../api/hooks';
+import { SignInPrompt } from '../components/Gates';
 import { ErrorState, Loading } from '../components/States';
 import { formatPrice } from '../lib/format';
 
 export default function MasterSetsPage() {
-  const masterSets = useMasterSets();
+  const me = useMe();
+  const signedIn = Boolean(me.data?.signedIn);
+  const masterSets = useMasterSets(signedIn);
   const sets = useSets();
   const create = useCreateMasterSet();
   const navigate = useNavigate();
   const [setId, setSetId] = useState('');
 
-  if (masterSets.isPending || sets.isPending) return <Loading label="Loading master sets…" />;
+  if (me.isPending) return <Loading label="Loading master sets…" />;
+  if (!signedIn) return <SignInPrompt title="Master sets" detail="Sign in to build a printing-by-printing checklist for any set and track what it would cost to finish." />;
   if (masterSets.error) return <ErrorState error={masterSets.error} onRetry={() => masterSets.refetch()} />;
   if (sets.error) return <ErrorState error={sets.error} onRetry={() => sets.refetch()} />;
+  if (!masterSets.data || !sets.data) return <Loading label="Loading master sets…" />;
 
   const add = async () => {
     if (!setId) return;
