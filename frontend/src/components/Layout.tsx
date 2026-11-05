@@ -75,6 +75,9 @@ export function Layout() {
             <NavLink to="/dashboard" className={navClass}>
               Dashboard
             </NavLink>
+            <NavLink to="/live-drops" className={navClass}>
+              Live Drops
+            </NavLink>
             {session.data?.hasStoreFinder && (
               <NavLink to="/available-in-stores" className={navClass}>
                 Available in Stores
