@@ -8,7 +8,6 @@ public sealed class ProductStore(string connectionString)
 {
     private readonly string _connectionString = connectionString;
 
-    public sealed record UserRow(Guid Id, string? Email);
     public sealed record SubscriptionRow(
         Guid UserId,
         string? CustomerId,
@@ -36,49 +35,21 @@ public sealed class ProductStore(string connectionString)
         return connection;
     }
 
-    public async Task<UserRow?> FindUserByTokenHashAsync(string hash, CancellationToken cancellationToken)
+    public async Task<bool> UserExistsAsync(Guid id, CancellationToken cancellationToken)
     {
         await using var connection = await OpenAsync(cancellationToken);
-        await using var command = new NpgsqlCommand(
-            "SELECT id, email FROM app_users WHERE session_token_hash = @hash", connection);
-        command.Parameters.AddWithValue("hash", hash);
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        return await reader.ReadAsync(cancellationToken)
-            ? new UserRow(reader.GetGuid(0), reader.IsDBNull(1) ? null : reader.GetString(1))
-            : null;
-    }
-
-    public async Task<UserRow> CreateUserAsync(Guid id, string tokenHash, DateTimeOffset now, CancellationToken cancellationToken)
-    {
-        await using var connection = await OpenAsync(cancellationToken);
-        await using var command = new NpgsqlCommand(
-            """
-            INSERT INTO app_users (id, session_token_hash, created_at, last_seen_at)
-            VALUES (@id, @hash, @now, @now)
-            """, connection);
+        await using var command = new NpgsqlCommand("SELECT EXISTS (SELECT 1 FROM app_users WHERE id = @id)", connection);
         command.Parameters.AddWithValue("id", id);
-        command.Parameters.AddWithValue("hash", tokenHash);
-        command.Parameters.AddWithValue("now", now);
-        await command.ExecuteNonQueryAsync(cancellationToken);
-        return new UserRow(id, null);
+        return await command.ExecuteScalarAsync(cancellationToken) is true;
     }
 
-    public async Task TouchUserAsync(Guid id, DateTimeOffset now, CancellationToken cancellationToken)
-    {
-        await using var connection = await OpenAsync(cancellationToken);
-        await using var command = new NpgsqlCommand(
-            "UPDATE app_users SET last_seen_at = @now WHERE id = @id", connection);
-        command.Parameters.AddWithValue("id", id);
-        command.Parameters.AddWithValue("now", now);
-        await command.ExecuteNonQueryAsync(cancellationToken);
-    }
-
+    /// <summary>Remembers the email a customer gave Stripe. Never replaces a verified sign-in address.</summary>
     public async Task SetEmailAsync(Guid id, string? email, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(email)) return;
         await using var connection = await OpenAsync(cancellationToken);
         await using var command = new NpgsqlCommand(
-            "UPDATE app_users SET email = @email WHERE id = @id", connection);
+            "UPDATE app_users SET email = @email WHERE id = @id AND email_verified_at IS NULL", connection);
         command.Parameters.AddWithValue("id", id);
         command.Parameters.AddWithValue("email", email.Trim());
         await command.ExecuteNonQueryAsync(cancellationToken);
@@ -382,6 +353,70 @@ public sealed class ProductStore(string connectionString)
         await using var command = new NpgsqlCommand(
             "UPDATE alert_events SET read_at = @now WHERE user_id = @user AND read_at IS NULL", connection);
         command.Parameters.AddWithValue("user", userId);
+        command.Parameters.AddWithValue("now", now);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    public sealed record PendingAlertEmail(long Id, Guid UserId, string Email, Guid UnsubscribeToken, string Message);
+
+    /// <summary>Alerts not yet emailed, newer than <paramref name="since"/>, for signed-in users with alert emails on.</summary>
+    public async Task<IReadOnlyList<PendingAlertEmail>> GetPendingAlertEmailsAsync(DateTimeOffset since, CancellationToken cancellationToken)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command = new NpgsqlCommand(
+            """
+            SELECT a.id, a.user_id, u.email, u.unsubscribe_token, a.message
+            FROM alert_events a
+            JOIN app_users u ON u.id = a.user_id
+            WHERE a.email_processed_at IS NULL
+              AND a.created_at > @since
+              AND u.email_verified_at IS NOT NULL
+              AND u.email_alerts
+            ORDER BY a.user_id, a.created_at
+            """, connection);
+        command.Parameters.AddWithValue("since", since);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        var pending = new List<PendingAlertEmail>();
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            pending.Add(new PendingAlertEmail(
+                reader.GetInt64(0),
+                reader.GetGuid(1),
+                reader.GetString(2),
+                reader.GetGuid(3),
+                reader.GetString(4)));
+        }
+        return pending;
+    }
+
+    public async Task MarkAlertEmailsProcessedAsync(long[] alertIds, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        if (alertIds.Length == 0) return;
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command = new NpgsqlCommand(
+            "UPDATE alert_events SET email_processed_at = @now WHERE id = ANY(@ids)", connection);
+        command.Parameters.AddWithValue("ids", alertIds);
+        command.Parameters.AddWithValue("now", now);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Settles alerts that will never be emailed (too old, or the user isn't signed in or opted out),
+    /// so a later sign-in or opt-in doesn't send a backlog.
+    /// </summary>
+    public async Task SkipUnsendableAlertEmailsAsync(DateTimeOffset since, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command = new NpgsqlCommand(
+            """
+            UPDATE alert_events a
+            SET email_processed_at = @now
+            FROM app_users u
+            WHERE u.id = a.user_id
+              AND a.email_processed_at IS NULL
+              AND (a.created_at <= @since OR u.email_verified_at IS NULL OR NOT u.email_alerts)
+            """, connection);
+        command.Parameters.AddWithValue("since", since);
         command.Parameters.AddWithValue("now", now);
         await command.ExecuteNonQueryAsync(cancellationToken);
     }

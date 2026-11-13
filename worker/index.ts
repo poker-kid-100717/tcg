@@ -22,6 +22,10 @@ export interface Env {
   /** Forward-looking replacement/enrichment provider for the deprecated Pokémon TCG API. */
   TCG_SCRYDEX_API_KEY?: string;
   TCG_SCRYDEX_TEAM_ID?: string;
+  /** Resend API key and sender for sign-in codes and alert emails; without them, sign-in is reported unavailable. */
+  TCG_RESEND_API_KEY?: string;
+  TCG_EMAIL_FROM?: string;
+  TCG_EMAIL_REPLY_TO?: string;
 }
 
 /**
@@ -50,6 +54,9 @@ export class TcgApi extends Container<Env> {
       ...(env.TCG_STRIPE_COMPLETE_MONTHLY_PRICE_ID ? { Billing__CompleteMonthlyPriceId: env.TCG_STRIPE_COMPLETE_MONTHLY_PRICE_ID } : {}),
       ...(env.TCG_SCRYDEX_API_KEY ? { Scrydex__ApiKey: env.TCG_SCRYDEX_API_KEY } : {}),
       ...(env.TCG_SCRYDEX_TEAM_ID ? { Scrydex__TeamId: env.TCG_SCRYDEX_TEAM_ID } : {}),
+      ...(env.TCG_RESEND_API_KEY ? { Email__ResendApiKey: env.TCG_RESEND_API_KEY } : {}),
+      ...(env.TCG_EMAIL_FROM ? { Email__From: env.TCG_EMAIL_FROM } : {}),
+      ...(env.TCG_EMAIL_REPLY_TO ? { Email__ReplyTo: env.TCG_EMAIL_REPLY_TO } : {}),
     };
   }
 }

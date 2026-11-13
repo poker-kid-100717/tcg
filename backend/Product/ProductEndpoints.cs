@@ -17,7 +17,7 @@ public static class ProductEndpoints
             CancellationToken ct) =>
         {
             var user = await sessions.GetOrCreateAsync(context, ct);
-            return Results.Ok(await entitlements.GetAccountAsync(user.Id, ct));
+            return Results.Ok(await entitlements.GetAccountAsync(user, ct));
         });
 
         api.MapGet("/cards/{id}/intelligence", async Task<IResult> (
@@ -30,7 +30,7 @@ public static class ProductEndpoints
             CancellationToken ct) =>
         {
             var user = await sessions.GetOrCreateAsync(context, ct);
-            var account = await entitlements.GetAccountAsync(user.Id, ct);
+            var account = await entitlements.GetAccountAsync(user, ct);
             if (!account.IsPro) return ProRequired();
             return await intelligence.GetAsync(id, variant, ct) is { } value
                 ? Results.Ok(value)
@@ -58,7 +58,7 @@ public static class ProductEndpoints
             CancellationToken ct) =>
         {
             var user = await sessions.GetOrCreateAsync(context, ct);
-            var account = await entitlements.GetAccountAsync(user.Id, ct);
+            var account = await entitlements.GetAccountAsync(user, ct);
             if (!account.IsPro && await store.CountWatchlistAsync(user.Id, ct) >= 3)
                 return Results.Problem(statusCode: 403, title: "Free watchlist limit reached", detail: "Pro unlocks an unlimited watchlist.");
 
@@ -154,7 +154,7 @@ public static class ProductEndpoints
             CancellationToken ct) =>
         {
             var user = await sessions.GetOrCreateAsync(context, ct);
-            var account = await entitlements.GetAccountAsync(user.Id, ct);
+            var account = await entitlements.GetAccountAsync(user, ct);
             var watchlist = await store.GetWatchlistAsync(user.Id, ct);
             var alerts = await store.GetAlertsAsync(user.Id, 20, ct);
             return Results.Ok(new DashboardView(account, watchlist, alerts, alerts.Count(a => a.ReadAt is null)));
@@ -180,7 +180,7 @@ public static class ProductEndpoints
             CancellationToken ct) =>
         {
             var user = await sessions.GetOrCreateAsync(context, ct);
-            var account = await entitlements.GetAccountAsync(user.Id, ct);
+            var account = await entitlements.GetAccountAsync(user, ct);
             if (!account.IsPro && await masterSets.CountAsync(user.Id, ct) >= 1)
                 return Results.Problem(statusCode: 403, title: "Free master-set limit reached", detail: "Pro unlocks unlimited master sets.");
 
@@ -240,7 +240,7 @@ public static class ProductEndpoints
             CancellationToken ct) =>
         {
             var user = await sessions.GetOrCreateAsync(context, ct);
-            var account = await entitlements.GetAccountAsync(user.Id, ct);
+            var account = await entitlements.GetAccountAsync(user, ct);
             if (!account.IsPro) return ProRequired();
             return await service.GetAdvisorContextAsync(user.Id, id, ct) is { } value
                 ? Results.Ok(value)
@@ -258,7 +258,7 @@ public static class ProductEndpoints
             CancellationToken ct) =>
         {
             var user = await sessions.GetOrCreateAsync(context, ct);
-            var account = await entitlements.GetAccountAsync(user.Id, ct);
+            var account = await entitlements.GetAccountAsync(user, ct);
             if (request.Plan is not ("monthly" or "annual" or "storefinder" or "complete"))
                 return Results.ValidationProblem(new Dictionary<string, string[]> { ["plan"] = ["Choose a supported subscription plan."] });
 
@@ -271,8 +271,13 @@ public static class ProductEndpoints
             if (request.Plan == "complete" && (!options.StripeConfigured || string.IsNullOrWhiteSpace(options.CompleteMonthlyPriceId)))
                 return Results.Problem(statusCode: 503, title: "Complete plan billing is not configured yet.");
 
+            // A subscription bought from an anonymous browser profile would be lost with its cookie,
+            // so paying requires a verified email that works on every device.
+            if (!user.SignedIn)
+                return AccountEndpoints.SignInRequired("Sign in with your email first so your subscription works on every device.");
+
             var subscription = await store.GetSubscriptionAsync(user.Id, ct);
-            var url = await stripe.CreateCheckoutAsync(user.Id, request.Plan, subscription?.CustomerId, ct);
+            var url = await stripe.CreateCheckoutAsync(user.Id, request.Plan, subscription?.CustomerId, user.Email, ct);
             return Results.Ok(new BillingLink(url));
         });
 

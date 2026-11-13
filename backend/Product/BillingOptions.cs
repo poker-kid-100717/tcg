@@ -1,3 +1,5 @@
+using PokemonTCG.API.Email;
+
 namespace PokemonTCG.API.Product;
 
 public sealed class BillingOptions
@@ -26,25 +28,29 @@ public sealed class BillingOptions
         !string.IsNullOrWhiteSpace(StoreFinderMonthlyPriceId);
 }
 
-public sealed class EntitlementService(ProductStore store, BillingOptions billing)
+public sealed class EntitlementService(ProductStore store, BillingOptions billing, IEmailSender email)
 {
-    public async Task<AccountView> GetAccountAsync(Guid userId, CancellationToken cancellationToken)
+    public async Task<AccountView> GetAccountAsync(AppUser user, CancellationToken cancellationToken)
     {
-        var subscription = await store.GetSubscriptionAsync(userId, cancellationToken);
+        var subscription = await store.GetSubscriptionAsync(user.Id, cancellationToken);
 
         // Until Stripe is configured, the production app runs as a founding preview:
         // paid workflows can be exercised without fake checkout or fake stock data.
         if (!billing.IsConfigured)
         {
             return new AccountView(
-                userId,
+                user.Id,
                 false,
                 false,
                 true,
                 true,
                 "preview",
                 null,
-                "Founding preview");
+                "Founding preview",
+                user.SignedIn,
+                user.Email,
+                user.EmailAlerts,
+                email.IsConfigured);
         }
 
         var active = subscription?.Status is "active" or "trialing";
@@ -53,13 +59,17 @@ public sealed class EntitlementService(ProductStore store, BillingOptions billin
         var hasStoreFinder = active && plan is "storefinder" or "complete";
 
         return new AccountView(
-            userId,
+            user.Id,
             true,
             billing.StoreFinderIsConfigured,
             isPro,
             hasStoreFinder,
             plan,
             subscription?.Status,
-            "Live billing");
+            "Live billing",
+            user.SignedIn,
+            user.Email,
+            user.EmailAlerts,
+            email.IsConfigured);
     }
 }

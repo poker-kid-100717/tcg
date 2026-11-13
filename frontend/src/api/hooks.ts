@@ -75,6 +75,38 @@ export const useSession = () =>
     retry: 1,
   });
 
+/** Signing in or out changes whose watchlist, alerts and master sets every page shows. */
+export const useVerifySignInCode = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ email, code }: { email: string; code: string }) => api.verifySignInCode(email, code),
+    onSuccess: async (account) => {
+      queryClient.setQueryData(['session'], account);
+      await queryClient.invalidateQueries({ predicate: (query) => query.queryKey[0] !== 'session' });
+    },
+  });
+};
+
+export const useSignOut = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.signOut(),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries();
+    },
+  });
+};
+
+export const useUpdatePreferences = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { emailAlerts: boolean }) => api.updatePreferences(input),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['session'] });
+    },
+  });
+};
+
 export const useIntelligence = (cardId: string, variant: string, enabled = true) =>
   useQuery({
     queryKey: ['intelligence', cardId, variant],

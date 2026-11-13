@@ -16,6 +16,7 @@ public sealed class StripeBillingService(
         Guid userId,
         string plan,
         string? existingCustomerId,
+        string? email,
         CancellationToken cancellationToken)
     {
         EnsureConfigured();
@@ -55,7 +56,9 @@ public sealed class StripeBillingService(
             ["subscription_data[metadata][user_id]"] = userId.ToString(),
             ["subscription_data[metadata][plan]"] = normalized,
         };
+        // Stripe accepts either an existing customer or an email to prefill, not both.
         if (!string.IsNullOrWhiteSpace(existingCustomerId)) fields["customer"] = existingCustomerId;
+        else if (!string.IsNullOrWhiteSpace(email)) fields["customer_email"] = email;
 
         using var request = new HttpRequestMessage(HttpMethod.Post, "https://api.stripe.com/v1/checkout/sessions")
         {
@@ -139,6 +142,11 @@ public sealed class StripeBillingService(
     {
         var userText = GetString(obj, "client_reference_id") ?? Metadata(obj, "user_id");
         if (!Guid.TryParse(userText, out var userId)) return;
+        if (!await store.UserExistsAsync(userId, cancellationToken))
+        {
+            logger.LogWarning("Stripe checkout completed for unknown user {UserId}", userId);
+            return;
+        }
 
         var customer = IdOrString(obj, "customer");
         var subscription = IdOrString(obj, "subscription");
@@ -154,9 +162,12 @@ public sealed class StripeBillingService(
     {
         var subscriptionId = GetString(obj, "id");
         var customerId = IdOrString(obj, "customer");
-        var userText = Metadata(obj, "user_id");
-        Guid? userId = Guid.TryParse(userText, out var parsed) ? parsed : null;
-        userId ??= await store.FindUserByExternalAsync(customerId, subscriptionId, cancellationToken);
+        // Look up by Stripe ids first: when an anonymous browser profile is merged into an account on
+        // sign-in, its subscription moves with it but Stripe's metadata still names the old profile.
+        var userId = await store.FindUserByExternalAsync(customerId, subscriptionId, cancellationToken);
+        if (userId is null && Guid.TryParse(Metadata(obj, "user_id"), out var parsed) &&
+            await store.UserExistsAsync(parsed, cancellationToken))
+            userId = parsed;
         if (userId is null) return;
 
         var status = GetString(obj, "status") ?? "inactive";

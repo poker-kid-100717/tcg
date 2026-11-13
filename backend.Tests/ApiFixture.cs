@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
+using PokemonTCG.API.Email;
 using PokemonTCG.API.Pricing;
 using Testcontainers.PostgreSql;
 
@@ -17,6 +18,9 @@ namespace PokemonTcgMarketplace.Backend.Tests
 
         public FakePokemonTcgApi Upstream { get; } = new();
 
+        /// <summary>Every email the API sent, so tests can read sign-in codes and alert digests.</summary>
+        public FakeEmailSender Emails { get; } = new();
+
         /// <summary>The API's clock: real time plus <see cref="TestClock.Offset"/>, so a test can record "last week".</summary>
         public TestClock Clock { get; } = new();
         public WebApplicationFactory<Program> Factory { get; private set; } = null!;
@@ -30,11 +34,15 @@ namespace PokemonTcgMarketplace.Backend.Tests
                 builder.UseSetting("ConnectionStrings:DefaultConnection", _postgres.GetConnectionString());
                 builder.UseSetting("PokemonTcgApi:BaseUrl", "https://tcg.test/v2/");
                 builder.UseSetting("Snapshots:PageDelayMilliseconds", "0");
+                // Every test client shares one IP, so the per-IP sign-in limits would trip across tests.
+                builder.UseSetting("SignIn:CodeRequestsPerIp", "10000");
+                builder.UseSetting("SignIn:VerifyRequestsPerIp", "10000");
                 foreach (var (key, value) in Settings) builder.UseSetting(key, value);
                 builder.ConfigureTestServices(services =>
                 {
                     services.AddHttpClient<PokemonTcgClient>().ConfigurePrimaryHttpMessageHandler(() => Upstream);
                     services.AddSingleton<TimeProvider>(Clock);
+                    services.AddSingleton<IEmailSender>(Emails);
                 });
             });
 

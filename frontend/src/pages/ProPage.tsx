@@ -1,6 +1,7 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 
-import { api } from '../api/client';
+import { api, ApiError } from '../api/client';
 import { useSession } from '../api/hooks';
 import { Loading } from '../components/States';
 
@@ -8,19 +9,29 @@ type CheckoutPlan = 'monthly' | 'annual' | 'storefinder' | 'complete';
 
 export default function ProPage() {
   const session = useSession();
+  const navigate = useNavigate();
   const [working, setWorking] = useState<CheckoutPlan | 'portal' | null>(null);
   const [error, setError] = useState('');
 
   if (session.isPending) return <Loading label="Loading plans…" />;
 
   const account = session.data;
+  // Paying needs an account that works on every device, so checkout starts with sign-in.
   const goCheckout = async (plan: CheckoutPlan) => {
+    if (!account?.signedIn) {
+      navigate('/sign-in?next=/pro');
+      return;
+    }
     setWorking(plan);
     setError('');
     try {
       const result = await api.checkout(plan);
       window.location.assign(result.url);
     } catch (e) {
+      if (e instanceof ApiError && e.status === 401) {
+        navigate('/sign-in?next=/pro');
+        return;
+      }
       setError(e instanceof Error ? e.message : 'Unable to start checkout.');
       setWorking(null);
     }
@@ -53,6 +64,9 @@ export default function ProPage() {
           <div className="mx-auto mt-2 rounded-full bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-800 ring-1 ring-emerald-200">
             Founding preview active — paid features are unlocked while billing is being configured.
           </div>
+        )}
+        {!preview && account && !account.signedIn && account.signInAvailable && (
+          <p className="text-sm text-slate-600">You'll sign in with your email before checkout, so your plan works on every device.</p>
         )}
       </header>
 

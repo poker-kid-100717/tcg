@@ -247,6 +247,12 @@ export interface Account {
   plan: string;
   subscriptionStatus: string | null;
   mode: string;
+  /** True once this browser is signed in with a verified email. */
+  signedIn: boolean;
+  email: string | null;
+  emailAlerts: boolean;
+  /** False until an email provider is configured; sign-in can't be offered without one. */
+  signInAvailable: boolean;
 }
 
 export interface SoldComp {

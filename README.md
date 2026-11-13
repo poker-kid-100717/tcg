@@ -301,7 +301,8 @@ Key components:
 
 Responsibilities include:
 
-- Device session identity
+- Browser sessions and email sign-in
+- Alert emails (Resend)
 - Backend entitlement calculation
 - Stripe subscription state
 - Watchlists
@@ -407,7 +408,9 @@ Primary areas include:
 | Snapshot runs | Core API | EF Core |
 | Prediction runs | Core API | EF Core |
 | Price predictions | Core API | EF Core |
-| Device users | Core Product domain | Direct Npgsql |
+| Users (anonymous or email-verified) | Core Product domain | Direct Npgsql |
+| Browser sessions | Core Product domain | Direct Npgsql |
+| Sign-in codes | Core Product domain | Direct Npgsql |
 | Subscriptions | Core Product domain | Direct Npgsql |
 | Watchlists | Core Product domain | Direct Npgsql |
 | Alert events | Core Product domain | Direct Npgsql |
@@ -453,6 +456,7 @@ flowchart LR
     S --> P[PriceSnapshotService]
     P --> DB[(PostgreSQL)]
     P --> A[Evaluate watchlist alerts]
+    A --> E[Email alert digests]
 
     C2[11:45 UTC Cron] --> M[/internal/predictions]
     M --> T[PredictionService]
@@ -569,26 +573,43 @@ Inventory.Service consumes the provider through `IInventoryProvider`; retailer-s
 
 ## 12. Identity and authorization
 
-The current identity model is intentionally lightweight.
+Every visitor can use the product before creating an account, and signing in never loses that work.
 
-### Device session
+### Browser sessions
 
-A first-party device session is created using:
+Each browser gets a first-party session on its first personalized request:
 
 - cryptographically random 256-bit token
-- SHA-256 token hash persisted in PostgreSQL
-- HttpOnly cookie
-- Secure cookie over HTTPS
-- SameSite=Lax
-- 180-day expiration
+- only its SHA-256 hash stored, in `user_sessions` (one row per browser, so one account can be signed in on several devices)
+- HttpOnly, SameSite=Lax cookie, Secure over HTTPS
+- 180-day lifetime, extended while the browser stays active
 
-The raw token is never stored in the database.
+A browser that has never signed in owns an **anonymous profile**: its watchlist, master sets and alerts live with that cookie.
+
+### Email sign-in
+
+Sign-in is passwordless. `POST /api/auth/code` emails a six-digit code; `POST /api/auth/verify` exchanges it for a signed-in session. Signing up and signing in are the same flow, so the API never reveals whether an address has an account.
+
+- Codes are stored as salted SHA-256 hashes, expire after 10 minutes and work once.
+- A code stops working after 5 wrong guesses, and requesting a new code invalidates older ones.
+- An address can request 5 codes an hour; the code and verify endpoints are also rate-limited per client IP.
+- A successful sign-in always issues a new session token (no session fixation).
+
+What happens to the browser's existing data:
+
+| Situation | Result |
+|---|---|
+| First sign-in for this address | The browser's anonymous profile becomes the account |
+| Address already has an account, browser is anonymous | The browser's watchlist, master sets and any subscription merge into the account; the account's copy wins on duplicates |
+| Browser was signed in as someone else | It switches accounts; nothing is merged |
+
+If an anonymous profile and the account both hold live subscriptions, the profile is kept (so Stripe events still resolve) and a warning is logged for support.
+
+Without an email provider configured, sign-in reports itself unavailable (`signInAvailable: false`) and the site keeps working with anonymous profiles.
 
 ### Authorization
 
-Collector-owned resources are scoped by resolved user ID.
-
-Examples:
+Collector-owned resources are scoped by the server-resolved user ID:
 
 - watchlist mutations
 - alert reads
@@ -603,14 +624,9 @@ Core API calculates:
 - Pro access
 - Store Finder access
 - current plan / status
+- sign-in state
 
 The Worker calls the Core API before forwarding inventory coordinates.
-
-### MVP limitation
-
-Device-bound identity is not a substitute for production multi-device authentication.
-
-The intended evolution is OIDC-based account identity with migration of the existing device profile into the authenticated account.
 
 ---
 
@@ -620,6 +636,7 @@ Stripe is optional by design.
 
 When required Stripe settings are present:
 
+- Checkout requires a signed-in account, so a subscription is never tied to one browser. The verified email is prefilled in Stripe.
 - Checkout creates a subscription flow.
 - Webhooks update backend subscription state.
 - Customer Portal manages subscription lifecycle.
@@ -633,6 +650,12 @@ Recognized active subscription states include:
 When Stripe is not configured, the application enters **Founding Preview** mode so product workflows remain testable without fake checkout state.
 
 Store Finder and Pro are modeled as separate entitlements; a combined plan can grant both.
+
+Webhooks resolve the user by Stripe customer/subscription id before the `user_id` metadata, because a subscription merged into an account on sign-in keeps the original profile's id in Stripe metadata.
+
+### Alert emails
+
+After the daily snapshot evaluates watchlist alerts, each signed-in collector with alert emails on gets one digest through Resend. Alerts older than two days are never emailed, a failed send is retried by the next run, and every digest carries an RFC 8058 one-click `List-Unsubscribe` header. Collectors can turn emails off from their account page or the link in the email.
 
 ---
 
@@ -726,6 +749,11 @@ Optional provider/billing secrets:
 | `STRIPE_PRO_ANNUAL_PRICE_ID` | Pro annual plan |
 | `STRIPE_STORE_FINDER_MONTHLY_PRICE_ID` | Store Finder plan |
 | `STRIPE_COMPLETE_MONTHLY_PRICE_ID` | Combined plan |
+| `RESEND_API_KEY` | Resend credential for sign-in codes and alert emails |
+| `EMAIL_FROM` | Sender, e.g. `TCG Signal <alerts@example.com>`; its domain must be verified in Resend |
+| `EMAIL_REPLY_TO` | Optional reply-to address |
+
+Billing should not be switched on without `RESEND_API_KEY` and `EMAIL_FROM`: checkout requires a signed-in account, and sign-in needs email.
 
 ### Security controls
 
@@ -742,10 +770,8 @@ Optional provider/billing secrets:
 
 Before broad consumer launch:
 
-- replace device identity with OIDC
-- add explicit account recovery and multi-device semantics
-- formalize rate limits
 - add abuse controls for high-cost provider/AI endpoints
+- move the in-process rate limiter to a shared store if the API ever runs more than one instance
 - rotate any credential that was ever committed to repository history
 
 ---
@@ -824,7 +850,12 @@ Representative routes:
 | GET | `/api/market/sleepers` | Core | Supply-gap signal |
 | GET | `/api/predictions` | Core | Published predictions |
 | GET | `/api/predictions/model` | Core | Validation / model status |
-| POST | `/api/session` | Core | Resolve/create device identity |
+| POST | `/api/session` | Core | Resolve the browser's profile (creates an anonymous one) |
+| POST | `/api/auth/code` | Core | Email a sign-in code |
+| POST | `/api/auth/verify` | Core | Sign in with the code |
+| POST | `/api/auth/sign-out` | Core | End this browser's session |
+| PUT | `/api/account/preferences` | Core | Alert email preference |
+| POST | `/api/email/unsubscribe?token=` | Core | One-click unsubscribe from alert emails |
 | GET/POST | `/api/watchlist` | Core | Watchlist workflows |
 | GET | `/api/alerts` | Core | In-app alerts |
 | GET | `/api/dashboard` | Core | Personalized dashboard |
@@ -1018,20 +1049,21 @@ Database-level blast radius remains shared until databases are physically separa
 
 ---
 
-### ADR-004 — Device identity before full OIDC
+### ADR-004 — Anonymous profiles plus passwordless email sign-in
 
-**Decision:** use a secure first-party device token for the MVP.
+**Decision:** every browser starts with an anonymous profile behind a first-party session token; a six-digit emailed code turns it into an account. No passwords, no third-party identity provider.
 
 **Why**
 
-- enables persisted user state immediately
-- avoids custom password authentication
-- supports billing-customer mapping
-- keeps the surface area small
+- collectors can use the product before signing up, and signing in keeps that work
+- a paid subscription must survive a cleared cookie or a new phone
+- no password storage, reset flow or credential-stuffing surface
+- one less vendor in the request path than a hosted identity provider
+- the same email provider also delivers alerts
 
 **Tradeoff**
 
-No true multi-device identity, recovery, or account federation yet.
+Sign-in depends on email delivery, and there is no social login. An OIDC provider can still be added later and mapped onto the same user IDs.
 
 ---
 
@@ -1070,11 +1102,10 @@ These are known architectural limitations rather than accidental omissions.
 ### Near term
 
 - Pokémon TCG API remains a compatibility dependency and should continue moving behind replaceable provider contracts.
-- Device identity needs OIDC before a broad multi-device launch.
 - Inventory needs more validated retailer sources.
 - Inventory database ownership is logical, not yet physically isolated.
-- High-cost AI/provider routes need formal rate limiting before substantial public traffic.
-- Email/push alert delivery is not yet part of the alert pipeline.
+- High-cost AI/provider routes need formal rate limiting before substantial public traffic (sign-in routes are rate-limited).
+- Alerts are delivered in-app and by daily email digest; push notifications are not built.
 - Production dashboards/alerts should be added around provider degradation, cron failures, database readiness, and container cold-start latency.
 
 ### Medium term
