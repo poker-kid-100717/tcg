@@ -94,12 +94,15 @@ jobs:
           fetch_until() {
             url="$1"
             pattern="$2"
-            for attempt in $(seq 1 12); do
+            # About 10 minutes: a new container image can take several minutes
+            # to roll out, and the API then runs its database migrations.
+            for attempt in $(seq 1 40); do
               body="$(curl --fail --silent --show-error --retry 2 --retry-delay 3 --retry-all-errors "$url" 2>/dev/null || true)"
               if printf '%s' "$body" | grep -q "$pattern"; then
                 return 0
               fi
-              echo "Verification attempt $attempt failed for $url; retrying..."
+              status="$(curl --silent --output /dev/null --write-out '%{http_code}' "$url" || true)"
+              echo "Verification attempt $attempt failed for $url (HTTP $status); retrying..."
               sleep 10
             done
             echo "Production verification failed for $url"
