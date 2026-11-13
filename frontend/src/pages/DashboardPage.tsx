@@ -43,6 +43,15 @@ export default function DashboardPage() {
         </div>
       </header>
 
+      {!data.account.signedIn && data.account.signInAvailable && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-amber-50 px-5 py-4 text-sm text-amber-900 ring-1 ring-amber-200">
+          <p>This dashboard is saved in this browser only. Sign in to keep it on every device and get alerts by email.</p>
+          <Link to="/sign-in?next=/dashboard" className="btn bg-pokemon-pokeblue px-3 py-1.5 text-sm text-white">
+            Sign in
+          </Link>
+        </div>
+      )}
+
       <div className="grid gap-4 sm:grid-cols-3">
         <Stat label="Watched printings" value={String(data.watchlist.length)} />
         <Stat label="Unread alerts" value={String(data.unreadAlerts)} />

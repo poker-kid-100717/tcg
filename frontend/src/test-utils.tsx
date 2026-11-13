@@ -5,7 +5,7 @@ import { vi } from 'vitest';
 
 /** Answers fetch('/api/…') from a map of path → JSON body (or a status code). */
 export function mockApi(routes: Record<string, unknown>) {
-  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
     const url = new URL(String(input), 'http://localhost');
     const key = url.pathname + url.search;
     const body = routes[key] ?? routes[url.pathname];

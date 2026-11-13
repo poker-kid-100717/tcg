@@ -55,8 +55,9 @@ async function request<T>(path: string, init: RequestInit = {}, signal?: AbortSi
     }
     throw new ApiError(response.status, message);
   }
-  if (response.status === 204) return undefined as T;
-  return response.json() as Promise<T>;
+  // 202 (code sent) and 204 carry no body.
+  const text = await response.text();
+  return (text ? JSON.parse(text) : undefined) as T;
 }
 
 const get = <T>(path: string, signal?: AbortSignal) => request<T>(path, {}, signal);
@@ -94,6 +95,11 @@ export const api = {
     ),
 
   session: () => post<Account>('/session'),
+  requestSignInCode: (email: string) => post<void>('/auth/code', { email }),
+  verifySignInCode: (email: string, code: string) => post<Account>('/auth/verify', { email, code }),
+  signOut: () => post<void>('/auth/sign-out'),
+  updatePreferences: (input: { emailAlerts: boolean }) => put<void>('/account/preferences', input),
+  unsubscribe: (token: string) => post<void>(`/email/unsubscribe?token=${enc(token)}`),
   intelligence: (id: string, variant: string, signal?: AbortSignal) =>
     get<MarketIntelligence>(`/cards/${enc(id)}/intelligence?variant=${enc(variant)}`, signal),
   watchlist: (signal?: AbortSignal) => get<WatchlistItem[]>('/watchlist', signal),

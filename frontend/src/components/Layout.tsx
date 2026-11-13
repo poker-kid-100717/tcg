@@ -82,6 +82,15 @@ export function Layout() {
             )}
           </nav>
           <SearchForm className="order-last w-full lg:order-none lg:ml-auto lg:w-64" />
+          {session.data?.signedIn ? (
+            <Link to="/account" className="max-w-[12rem] truncate text-sm font-semibold text-white/85 hover:text-white" title={session.data.email ?? undefined}>
+              {session.data.email}
+            </Link>
+          ) : session.data?.signInAvailable ? (
+            <Link to="/sign-in" className="text-sm font-semibold text-white/85 hover:text-white">
+              Sign in
+            </Link>
+          ) : null}
           <Link
             to="/pro"
             className="rounded-full bg-pokemon-yellow px-3 py-1.5 text-xs font-extrabold text-pokemon-pokeblue"

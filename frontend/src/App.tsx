@@ -20,6 +20,9 @@ const ProPage = lazy(() => import('./pages/ProPage'));
 const MasterSetsPage = lazy(() => import('./pages/MasterSetsPage'));
 const MasterSetPage = lazy(() => import('./pages/MasterSetPage'));
 const AvailableInStoresPage = lazy(() => import('./pages/AvailableInStoresPage'));
+const SignInPage = lazy(() => import('./pages/SignInPage'));
+const AccountPage = lazy(() => import('./pages/AccountPage'));
+const UnsubscribePage = lazy(() => import('./pages/UnsubscribePage'));
 
 export default function App() {
   return (
@@ -42,6 +45,9 @@ export default function App() {
             <Route path="master-sets" element={<MasterSetsPage />} />
             <Route path="master-sets/:id" element={<MasterSetPage />} />
             <Route path="about" element={<AboutPage />} />
+            <Route path="sign-in" element={<SignInPage />} />
+            <Route path="account" element={<AccountPage />} />
+            <Route path="email/unsubscribe" element={<UnsubscribePage />} />
             <Route path="*" element={<NotFound />} />
           </Route>
         </Routes>
