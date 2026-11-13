@@ -39,8 +39,9 @@ export default function AboutPage() {
       <p className="eyebrow mb-2">How it works</p>
       <h1 className="mb-4 text-3xl sm:text-4xl">Where the prices come from</h1>
       <p className="mb-10 max-w-2xl text-slate-600">
-        Card details and TCGplayer market prices come from the Pokémon TCG API. Once a day the app records every card&apos;s
-        prices, which is where the price history and the movers, trends and sleepers come from. Everything runs on Cloudflare.
+        Card details come from the Pokémon TCG API. Once a day the app records TCGplayer&apos;s prices for every card and sealed
+        product from TCGCSV, a free daily mirror of TCGplayer&apos;s data, which is where the price history, the movers, trends
+        and sleepers, and the fair-price comparisons come from. Everything runs on Cloudflare.
       </p>
 
       <ol className="mb-12 grid gap-3 md:grid-cols-4">

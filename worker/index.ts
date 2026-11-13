@@ -10,7 +10,9 @@ export interface Env {
   TCG_DATABASE_URL: string;
   /** Optional: raises the Pokémon TCG API's rate limit. */
   TCG_POKEMONTCG_API_KEY?: string;
-  /** Optional until billing goes live; absent values keep the app in founding-preview mode. */
+  /** "true" turns paid plans on. Off by default: prices come from TCGCSV, which is for free tools. */
+  TCG_BILLING_ENABLED?: string;
+  /** Optional until billing goes live; absent values keep the app a free beta. */
   TCG_STRIPE_SECRET_KEY?: string;
   TCG_STRIPE_WEBHOOK_SECRET?: string;
   TCG_STRIPE_PRO_MONTHLY_PRICE_ID?: string;
@@ -46,6 +48,7 @@ export class TcgApi extends Container<Env> {
       ASPNETCORE_ENVIRONMENT: "Production",
       ConnectionStrings__DefaultConnection: env.TCG_DATABASE_URL,
       ...(env.TCG_POKEMONTCG_API_KEY ? { PokemonTcgApi__ApiKey: env.TCG_POKEMONTCG_API_KEY } : {}),
+      ...(env.TCG_BILLING_ENABLED ? { Billing__Enabled: env.TCG_BILLING_ENABLED } : {}),
       ...(env.TCG_STRIPE_SECRET_KEY ? { Billing__StripeSecretKey: env.TCG_STRIPE_SECRET_KEY } : {}),
       ...(env.TCG_STRIPE_WEBHOOK_SECRET ? { Billing__StripeWebhookSecret: env.TCG_STRIPE_WEBHOOK_SECRET } : {}),
       ...(env.TCG_STRIPE_PRO_MONTHLY_PRICE_ID ? { Billing__ProMonthlyPriceId: env.TCG_STRIPE_PRO_MONTHLY_PRICE_ID } : {}),

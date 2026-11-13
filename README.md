@@ -405,6 +405,7 @@ Primary areas include:
 |---|---|---|
 | Cards / sets metadata | Core API | EF Core |
 | Price snapshots | Core API | EF Core |
+| Sealed products / sealed prices | Core API | Direct Npgsql |
 | Snapshot runs | Core API | EF Core |
 | Prediction runs | Core API | EF Core |
 | Price predictions | Core API | EF Core |
@@ -447,7 +448,7 @@ Cloudflare Cron Triggers wake the Core API container.
 
 | UTC | Job | Purpose |
 |---|---|---|
-| 11:15 | snapshots | Record current card/variant pricing |
+| 11:15 | snapshots | Record card and sealed prices from TCGCSV, evaluate and email alerts, remove unused browser profiles |
 | 11:45 | predictions | Train/validate model and refresh publishable predictions |
 
 ```mermaid
@@ -541,15 +542,25 @@ External integrations are treated as replaceable adapters rather than product-do
 
 ### Pokémon TCG API
 
-Current compatibility/catalog source for:
+Catalog source for:
 
 - cards
 - sets
 - images
-- TCGplayer-linked price data
-- snapshot ingestion
+- live TCGplayer prices on set and card pages
 
-All access is isolated behind `PokemonTcgClient`.
+All access is isolated behind `PokemonTcgClient`. The API is deprecated (new keys are no longer issued; existing keys work through March 1, 2027), so the catalog needs a replacement before then.
+
+### TCGCSV (daily prices)
+
+The daily snapshot reads [TCGCSV](https://tcgcsv.com), a free daily mirror of TCGplayer's catalog and prices, for both cards and sealed product: one products file and one prices file per set, about 450 small requests with a pause between each and an identifying User-Agent, once a day, as its guidelines ask.
+
+- Each TCGCSV group is paired with a card-database set by set code, release date and name (`TcgcsvMapping.MatchSets`); weak or ambiguous pairs are left out rather than risk filing one set's prices under another's cards.
+- Card prices are filed under the card database's ids by printed number ("006/165" → "6"), and printings map to the site's variant keys ("Reverse Holofoil" → `reverseHolofoil`).
+- The card catalog (names, images and the attributes the price model learns from) is loaded from the Pokémon TCG API a few sets per run and kept, so a run stays inside the scheduler's time limit.
+- Sealed product (ETBs, booster bundles, boxes, tins, collections) is classified by name and recorded with its daily market price.
+
+TCGCSV is meant for free tools and warns against profit-seeking use, so **billing stays off while it is the price source** (see §13).
 
 ### Scrydex
 
@@ -634,7 +645,7 @@ The Worker calls the Core API before forwarding inventory coordinates.
 
 ## 13. Billing behavior
 
-Stripe is optional by design.
+Stripe is optional by design, and paid plans are behind a master switch, `Billing:Enabled` (GitHub secret `BILLING_ENABLED`), which is **off by default**. While it is off the app is a free beta: every feature is unlocked, nothing can be bought, and checkout, the customer portal and webhooks are refused, whatever Stripe keys exist. Turn it on only after replacing TCGCSV with a licensed price provider.
 
 When required Stripe settings are present:
 
@@ -849,6 +860,7 @@ Representative routes:
 | GET | `/api/cards/{id}/intelligence` | Core | Market Intelligence |
 | GET | `/api/market/movers` | Core | Market movers |
 | GET | `/api/market/downtrend` | Core | Downtrend signal |
+| GET | `/api/sealed?type=&q=&all=` | Core | Sealed product: MSRP vs market price |
 | GET | `/api/market/sleepers` | Core | Supply-gap signal |
 | GET | `/api/predictions` | Core | Published predictions |
 | GET | `/api/predictions/model` | Core | Validation / model status |

@@ -15,6 +15,7 @@ import type {
   ModelSummary,
   NearbyInventory,
   PredictionList,
+  SealedList,
   SearchResults,
   SetDetail,
   SetSummary,
@@ -93,6 +94,15 @@ export const api = {
       },
       signal,
     ),
+
+  sealed: (filters: { type?: string; q?: string; all?: boolean }, signal?: AbortSignal) => {
+    const params = new URLSearchParams();
+    if (filters.type) params.set('type', filters.type);
+    if (filters.q) params.set('q', filters.q);
+    if (filters.all) params.set('all', 'true');
+    const query = params.toString();
+    return get<SealedList>(`/sealed${query ? `?${query}` : ''}`, signal);
+  },
 
   session: () => post<Account>('/session'),
   requestSignInCode: (email: string) => post<void>('/auth/code', { email }),

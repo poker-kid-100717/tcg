@@ -35,7 +35,17 @@ public sealed class SessionService(AccountStore accounts, TimeProvider clock)
         return session.User;
     }
 
-    /// <summary>The browser's profile, creating an anonymous one on its first visit.</summary>
+    /// <summary>
+    /// A visitor who has never saved anything. Not stored: reads with this id find nothing, and the
+    /// first save calls <see cref="GetOrCreateAsync"/>, which creates the profile and its cookie.
+    /// </summary>
+    public static readonly AppUser Visitor = new(Guid.Empty, null, true);
+
+    /// <summary>The browser's profile, or <see cref="Visitor"/> without touching the database when it has none.</summary>
+    public async Task<AppUser> CurrentAsync(HttpContext context, CancellationToken cancellationToken) =>
+        await FindAsync(context, cancellationToken) ?? Visitor;
+
+    /// <summary>The browser's profile, creating an anonymous one the first time it saves something.</summary>
     public async Task<AppUser> GetOrCreateAsync(HttpContext context, CancellationToken cancellationToken)
     {
         var existing = await FindAsync(context, cancellationToken);

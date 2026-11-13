@@ -75,6 +75,14 @@ export const useSession = () =>
     retry: 1,
   });
 
+export const useSealed = (filters: { type?: string; q?: string; all?: boolean }) =>
+  useQuery({
+    queryKey: ['sealed', filters.type ?? '', filters.q ?? '', filters.all ?? false],
+    queryFn: ({ signal }) => api.sealed(filters, signal),
+    staleTime: minutes(30),
+    placeholderData: keepPreviousData,
+  });
+
 /** Signing in or out changes whose watchlist, alerts and master sets every page shows. */
 export const useVerifySignInCode = () => {
   const queryClient = useQueryClient();

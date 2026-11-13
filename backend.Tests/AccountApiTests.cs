@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using PokemonTCG.API.Data;
 using PokemonTCG.API.Product;
@@ -21,11 +22,15 @@ public class AccountApiTests(ApiFixture fixture)
         var secondCard = await SeedCardAsync(20m);
 
         using var laptop = fixture.CreateClient();
+        var visitor = await SessionAsync(laptop);
+        Assert.False(visitor.SignedIn);
+        Assert.Equal(Guid.Empty, visitor.Id); // just looking around stores nothing
+        Assert.True(visitor.SignInAvailable);
+
+        await WatchAsync(laptop, firstCard); // the first save creates the browser's profile
         var anonymous = await SessionAsync(laptop);
-        Assert.False(anonymous.SignedIn);
+        Assert.NotEqual(Guid.Empty, anonymous.Id);
         Assert.Null(anonymous.Email);
-        Assert.True(anonymous.SignInAvailable);
-        await WatchAsync(laptop, firstCard);
 
         var signedIn = await SignInAsync(laptop, email);
         Assert.True(signedIn.SignedIn);
@@ -123,6 +128,7 @@ public class AccountApiTests(ApiFixture fixture)
     {
         await using var live = fixture.Factory.WithWebHostBuilder(builder =>
         {
+            builder.UseSetting("Billing:Enabled", "true");
             builder.UseSetting("Billing:StripeSecretKey", "sk_test_never_called");
             builder.UseSetting("Billing:StripeWebhookSecret", "whsec_never_called");
             builder.UseSetting("Billing:ProMonthlyPriceId", "price_monthly");
@@ -207,6 +213,33 @@ public class AccountApiTests(ApiFixture fixture)
 
         Assert.DoesNotContain(fixture.Emails.Sent.Skip(sentBefore), m => m.Text.Contains(cardId));
         Assert.False(anonymous.SignedIn);
+    }
+
+    [Fact]
+    public async Task Unused_browser_profiles_are_removed_after_30_days_but_profiles_holding_data_stay()
+    {
+        var cardId = await SeedCardAsync(10m);
+        using var keeper = fixture.CreateClient();
+        await WatchAsync(keeper, cardId);
+        var kept = (await SessionAsync(keeper)).Id;
+
+        var empty = Guid.NewGuid();
+        var old = fixture.Clock.GetUtcNow().AddDays(-45);
+        using (var scope = fixture.Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            await db.Database.ExecuteSqlRawAsync(
+                "INSERT INTO app_users (id, created_at, last_seen_at) VALUES ({0}, {1}, {1})", [empty, old], CancellationToken.None);
+            await db.Database.ExecuteSqlRawAsync("UPDATE app_users SET last_seen_at = {0} WHERE id = {1}", [old, kept], CancellationToken.None);
+
+            var accounts = scope.ServiceProvider.GetRequiredService<AccountStore>();
+            Assert.True(await accounts.DeleteAbandonedProfilesAsync(fixture.Clock.GetUtcNow().AddDays(-30), CancellationToken.None) >= 1);
+
+            var remaining = await db.Database
+                .SqlQueryRaw<Guid>("SELECT id AS \"Value\" FROM app_users WHERE id = {0} OR id = {1}", empty, kept)
+                .ToListAsync();
+            Assert.Equal([kept], remaining);
+        }
     }
 
     // ---- helpers ----------------------------------------------------------------------------

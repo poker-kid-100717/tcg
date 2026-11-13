@@ -54,9 +54,6 @@ public class PokemonTcgClient(HttpClient http)
     public Task<PagedResponse<TcgCard>> SearchCardsAsync(string name, int page, int pageSize, CancellationToken cancellationToken) =>
         GetCardPageAsync($"name:{Quote($"{name}*")}", page, pageSize, cancellationToken, orderBy: "-set.releaseDate,number");
 
-    public Task<PagedResponse<TcgCard>> GetAllCardsPageAsync(int page, CancellationToken cancellationToken) =>
-        GetCardPageAsync(query: null, page, MaxPageSize, cancellationToken);
-
     private async Task<PagedResponse<TcgCard>> GetCardPageAsync(
         string? query, int page, int pageSize, CancellationToken cancellationToken, string? orderBy = null)
     {

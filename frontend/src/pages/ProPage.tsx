@@ -52,6 +52,9 @@ export default function ProPage() {
   const preview = !account?.billingConfigured;
   const storeFinder = account?.storeFinderAvailable ?? false;
 
+  // Paid plans are switched off: everything is free while the beta runs.
+  if (preview) return <FreeBeta />;
+
   return (
     <div className="container-custom grid gap-10 py-10 sm:py-14">
       <header className="mx-auto grid max-w-3xl gap-3 text-center">
@@ -72,12 +75,7 @@ export default function ProPage() {
             </p>
           </>
         )}
-        {preview && (
-          <div className="mx-auto mt-2 rounded-full bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-800 ring-1 ring-emerald-200">
-            Founding preview active — paid features are unlocked while billing is being configured.
-          </div>
-        )}
-        {!preview && account && !account.signedIn && account.signInAvailable && (
+        {account && !account.signedIn && account.signInAvailable && (
           <p className="text-sm text-slate-600">You'll sign in with your email before checkout, so your plan works on every device.</p>
         )}
       </header>
@@ -109,9 +107,7 @@ export default function ProPage() {
                   {working === 'annual' ? 'Opening…' : 'Choose annual · $79'}
                 </button>
               </div>
-            ) : (
-              <Preview label="Pro preview enabled on this device" />
-            )
+            ) : null
           }
         />
 
@@ -139,9 +135,7 @@ export default function ProPage() {
                   <button type="button" className="btn w-full bg-pokemon-pokeblue text-white" disabled={working !== null} onClick={() => goCheckout('storefinder')}>
                     {working === 'storefinder' ? 'Opening…' : 'Add Store Finder · $4.99'}
                   </button>
-                ) : (
-                  <Preview label="Store Finder preview enabled on this device" />
-                )
+                ) : null
               }
             />
 
@@ -164,9 +158,7 @@ export default function ProPage() {
                   <button type="button" className="btn w-full bg-pokemon-pokeblue text-white" disabled={working !== null} onClick={() => goCheckout('complete')}>
                     {working === 'complete' ? 'Opening…' : 'Choose Complete · $12.99'}
                   </button>
-                ) : (
-                  <Preview label="Complete preview enabled on this device" />
-                )
+                ) : null
               }
             />
           </>
@@ -175,15 +167,13 @@ export default function ProPage() {
 
       {error && <p className="mx-auto max-w-xl rounded-lg bg-red-50 px-4 py-3 text-center text-sm text-red-800">{error}</p>}
 
-      {!preview && (
-        <p className="mx-auto max-w-xl text-center text-xs leading-5 text-slate-500">
-          Subscriptions renew automatically until you cancel, which you can do any time from your account. See the{' '}
-          <Link to="/terms" className="font-semibold text-pokemon-blue">
-            Terms of Service
-          </Link>
-          .
-        </p>
-      )}
+      <p className="mx-auto max-w-xl text-center text-xs leading-5 text-slate-500">
+        Subscriptions renew automatically until you cancel, which you can do any time from your account. See the{' '}
+        <Link to="/terms" className="font-semibold text-pokemon-blue">
+          Terms of Service
+        </Link>
+        .
+      </p>
 
       {storeFinder && (
         <>
@@ -202,8 +192,33 @@ export default function ProPage() {
   );
 }
 
-function Preview({ label }: { label: string }) {
-  return <div className="rounded-lg bg-emerald-50 px-4 py-3 text-center text-sm font-semibold text-emerald-800">{label}</div>;
+function FreeBeta() {
+  return (
+    <div className="container-custom grid justify-items-center py-12 sm:py-16">
+      <section className="panel grid w-full max-w-2xl gap-5 p-6 text-center sm:p-10">
+        <p className="eyebrow">Free beta</p>
+        <h1 className="text-3xl sm:text-4xl">Everything in TCG Signal is free right now.</h1>
+        <p className="text-slate-600">
+          There's nothing to buy during the beta. Every feature is unlocked, and there are no limits on your watchlist or
+          master sets.
+        </p>
+        <ul className="mx-auto grid gap-2 text-left text-sm text-slate-700">
+          {[
+            'Fair-price check: sealed product MSRP vs today\'s market',
+            'Market confidence, deal math and price outlooks',
+            'Unlimited watchlist with email alerts',
+            'Unlimited master set trackers with the AI Set Advisor',
+          ].map((feature) => (
+            <li key={feature} className="flex gap-2">
+              <span className="font-bold text-emerald-700">✓</span>
+              <span>{feature}</span>
+            </li>
+          ))}
+        </ul>
+        <p className="text-sm text-slate-500">If paid plans arrive later, we'll say so here before anything changes.</p>
+      </section>
+    </div>
+  );
 }
 
 function Plan({ name, price, description, features, actions, featured = false }: {

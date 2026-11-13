@@ -75,7 +75,7 @@ public static class AccountEndpoints
             AccountStore accounts,
             CancellationToken ct) =>
         {
-            var user = await sessions.GetOrCreateAsync(context, ct);
+            var user = await sessions.CurrentAsync(context, ct);
             if (!user.SignedIn) return SignInRequired("Sign in to choose how alerts reach you.");
             await accounts.SetEmailAlertsAsync(user.Id, request.EmailAlerts, ct);
             return Results.NoContent();
