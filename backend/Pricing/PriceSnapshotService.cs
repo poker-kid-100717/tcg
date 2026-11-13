@@ -124,9 +124,13 @@ public class PriceSnapshotService(
                     }
 
                     if (SealedProducts.Classify(product.Name) is not { } type) continue;
+                    // A catch-all group's date isn't its products' release date, so they only get one from TCGplayer.
+                    var groupDate = group.IsSupplemental == true || group.Name.Contains("Miscellaneous", StringComparison.OrdinalIgnoreCase)
+                        ? null
+                        : group.Published;
                     sealedListings.Add(new SealedListing(
                         product.ProductId, group.GroupId, TcgcsvMapping.StripSeriesPrefix(group.Name), set?.Id, product.Name, type,
-                        product.ImageUrl, product.Url, ReleaseDate(product) ?? group.Published));
+                        product.ImageUrl, product.Url, ReleaseDate(product) ?? groupDate));
                     var sealedPrice = prices[product.ProductId]
                         .OrderBy(p => string.Equals(p.SubTypeName, "Normal", StringComparison.OrdinalIgnoreCase) ? 0 : 1)
                         .FirstOrDefault(p => p.MarketPrice is not null);
