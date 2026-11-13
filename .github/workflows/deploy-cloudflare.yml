@@ -95,7 +95,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          SITE="https://tcg-portfolio-sample.app"
+          SITE="https://pokemon.tcg-portfolio-sample.app"
 
           fetch_until() {
             url="$1"

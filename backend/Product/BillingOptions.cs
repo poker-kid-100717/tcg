@@ -12,7 +12,7 @@ public sealed class BillingOptions
     public string ProAnnualPriceId { get; set; } = "";
     public string StoreFinderMonthlyPriceId { get; set; } = "";
     public string CompleteMonthlyPriceId { get; set; } = "";
-    public string SiteUrl { get; set; } = "https://tcg-portfolio-sample.app";
+    public string SiteUrl { get; set; } = "https://pokemon.tcg-portfolio-sample.app";
 
     public bool StripeConfigured =>
         !string.IsNullOrWhiteSpace(StripeSecretKey) &&
