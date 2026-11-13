@@ -145,6 +145,11 @@ public static class SealedProducts
         if (Has("code card") || Has("online code") || Has("sleeves") || Has("deck box") || Has("playmat") ||
             (Has("binder") && !Has("collection")))
             return null;
+        // Store-exclusive multi-item bundles ("Costco 2-Pack Trainer Box and Booster Bundle", "ETB and
+        // Pokeball (Sam's Club)") have no standard MSRP and mustn't be compared with a single item's.
+        if (Has("costco") || Has("sam's club") || Has("2-pack") || Has("2 pack") ||
+            (Has(" and ") && !Has("build and battle")))
+            return "Retail Bundle";
         if (Has("elite trainer box"))
             return bulk ? "ETB Case" : Has("pokemon center") || Has("pokémon center") ? "Pokémon Center ETB" : "Elite Trainer Box";
         if (Has("booster bundle")) return bulk ? "Booster Bundle Case" : "Booster Bundle";

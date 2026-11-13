@@ -92,6 +92,8 @@ public class TcgcsvMappingTests
     [InlineData("Chaos Rising Build & Battle Box", "Build & Battle Box")]
     [InlineData("Paldean Fates 3 Pack Blister", "Blister")]
     [InlineData("Charizard ex Premium Collection", "Collection")]
+    [InlineData("Costco Pokemon 30th Celebration 2-Pack Trainer Box and Booster Bundle", "Retail Bundle")]
+    [InlineData("Ascended Heroes Elite Trainer Box and Pokeball (Sam's Club)", "Retail Bundle")]
     [InlineData("Code Card - Surging Sparks Booster Pack", null)]
     [InlineData("Ultra Pro Card Sleeves", null)]
     public void Sealed_products_are_classified_by_name(string name, string? type) =>
