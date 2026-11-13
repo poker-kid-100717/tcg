@@ -61,6 +61,9 @@ export function Layout() {
             <NavLink to="/market" className={navClass}>
               Market
             </NavLink>
+            <NavLink to="/fair-price" className={navClass}>
+              Fair Price
+            </NavLink>
             <NavLink to="/outlook" className={navClass}>
               Outlook
             </NavLink>
@@ -96,7 +99,7 @@ export function Layout() {
             to="/pro"
             className="rounded-full bg-pokemon-yellow px-3 py-1.5 text-xs font-extrabold text-pokemon-pokeblue"
           >
-            {session.data?.isPro ? (session.data.billingConfigured ? 'PRO' : 'PRO PREVIEW') : 'GET PRO'}
+            {session.data && !session.data.billingConfigured ? 'FREE BETA' : session.data?.isPro ? 'PRO' : 'GET PRO'}
           </Link>
         </div>
       </header>
@@ -108,7 +111,7 @@ export function Layout() {
       <footer className="border-t border-slate-200 bg-white">
         <div className="container-custom flex flex-wrap items-center justify-between gap-3 py-6 text-sm text-slate-500">
           <p>
-            TCG Signal uses TCGplayer pricing via the Pokémon TCG API
+            TCG Signal records TCGplayer prices daily via TCGCSV; card details come from the Pokémon TCG API
             {status.data?.lastSnapshotAt ? `, last recorded ${formatDate(status.data.lastSnapshotAt, 'short')}` : ''}.
             Not affiliated with Nintendo, The Pokémon Company or TCGplayer.
           </p>

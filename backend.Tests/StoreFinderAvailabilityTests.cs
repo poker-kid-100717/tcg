@@ -44,6 +44,7 @@ public class StoreFinderAvailabilityTests(ApiFixture fixture)
     {
         await using var live = fixture.Factory.WithWebHostBuilder(builder =>
         {
+            builder.UseSetting("Billing:Enabled", "true");
             builder.UseSetting("Billing:StripeSecretKey", "sk_test_never_called");
             builder.UseSetting("Billing:StripeWebhookSecret", "whsec_never_called");
             builder.UseSetting("Billing:ProMonthlyPriceId", "price_monthly");

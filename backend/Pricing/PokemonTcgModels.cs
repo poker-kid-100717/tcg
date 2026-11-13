@@ -23,7 +23,8 @@ public record TcgSet(
     int PrintedTotal,
     int Total,
     string ReleaseDate,
-    TcgSetImages? Images)
+    TcgSetImages? Images,
+    string? PtcgoCode = null)
 {
     /// <summary>The API formats dates as yyyy/MM/dd.</summary>
     public DateOnly? Released => ParseDate(ReleaseDate);

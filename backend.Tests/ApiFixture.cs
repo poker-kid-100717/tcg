@@ -34,6 +34,8 @@ namespace PokemonTcgMarketplace.Backend.Tests
                 builder.UseSetting("ConnectionStrings:DefaultConnection", _postgres.GetConnectionString());
                 builder.UseSetting("PokemonTcgApi:BaseUrl", "https://tcg.test/v2/");
                 builder.UseSetting("Snapshots:PageDelayMilliseconds", "0");
+                builder.UseSetting("Tcgcsv:BaseUrl", "https://tcgcsv.test/");
+                builder.UseSetting("Tcgcsv:RequestDelayMilliseconds", "0");
                 // Every test client shares one IP, so the per-IP sign-in limits would trip across tests.
                 builder.UseSetting("SignIn:CodeRequestsPerIp", "10000");
                 builder.UseSetting("SignIn:VerifyRequestsPerIp", "10000");
@@ -41,6 +43,7 @@ namespace PokemonTcgMarketplace.Backend.Tests
                 builder.ConfigureTestServices(services =>
                 {
                     services.AddHttpClient<PokemonTcgClient>().ConfigurePrimaryHttpMessageHandler(() => Upstream);
+                    services.AddHttpClient<TcgcsvClient>().ConfigurePrimaryHttpMessageHandler(() => Upstream);
                     services.AddSingleton<TimeProvider>(Clock);
                     services.AddSingleton<IEmailSender>(Emails);
                 });

@@ -24,6 +24,7 @@ const SignInPage = lazy(() => import('./pages/SignInPage'));
 const AccountPage = lazy(() => import('./pages/AccountPage'));
 const UnsubscribePage = lazy(() => import('./pages/UnsubscribePage'));
 const TermsPage = lazy(() => import('./pages/TermsPage'));
+const FairPricePage = lazy(() => import('./pages/FairPricePage'));
 const PrivacyPage = lazy(() => import('./pages/PrivacyPage'));
 
 export default function App() {
@@ -38,6 +39,7 @@ export default function App() {
             <Route path="cards/:cardId" element={<CardPage />} />
             <Route path="search" element={<SearchPage />} />
             <Route path="market" element={<MarketPage />} />
+            <Route path="fair-price" element={<FairPricePage />} />
             <Route path="outlook" element={<OutlookPage />} />
             <Route path="deal" element={<DealAnalyzerPage />} />
             <Route path="watchlist" element={<WatchlistPage />} />

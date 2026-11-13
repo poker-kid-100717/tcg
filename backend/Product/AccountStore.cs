@@ -106,6 +106,27 @@ public sealed class AccountStore(string connectionString, ILogger<AccountStore> 
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
+    /// <summary>
+    /// Deletes browser profiles that never signed in, hold nothing (no watchlist, master set or
+    /// subscription) and haven't been used since <paramref name="lastSeenBefore"/>.
+    /// </summary>
+    /// <returns>How many were deleted.</returns>
+    public async Task<int> DeleteAbandonedProfilesAsync(DateTimeOffset lastSeenBefore, CancellationToken cancellationToken)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command = new NpgsqlCommand(
+            """
+            DELETE FROM app_users u
+            WHERE u.email_verified_at IS NULL
+              AND u.last_seen_at < @before
+              AND NOT EXISTS (SELECT 1 FROM watchlist_items w WHERE w.user_id = u.id)
+              AND NOT EXISTS (SELECT 1 FROM master_sets m WHERE m.user_id = u.id)
+              AND NOT EXISTS (SELECT 1 FROM subscriptions s WHERE s.user_id = u.id)
+            """, connection);
+        command.Parameters.AddWithValue("before", lastSeenBefore);
+        return await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
     // ---- Preferences ------------------------------------------------------------------------
 
     public async Task SetEmailAlertsAsync(Guid userId, bool enabled, CancellationToken cancellationToken)

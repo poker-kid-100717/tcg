@@ -70,6 +70,18 @@ builder.Services.AddHttpClient<PokemonTcgClient>(client =>
     });
 builder.Services.AddHybridCache();
 
+// Daily prices for cards and sealed product: TCGCSV's mirror of TCGplayer (see TcgcsvClient for its terms).
+var tcgcsvOptions = builder.Configuration.GetSection(TcgcsvOptions.SectionName).Get<TcgcsvOptions>() ?? new();
+builder.Services.AddSingleton(tcgcsvOptions);
+builder.Services.AddHttpClient<TcgcsvClient>(client =>
+    {
+        client.BaseAddress = new Uri(tcgcsvOptions.BaseUrl.EndsWith('/') ? tcgcsvOptions.BaseUrl : tcgcsvOptions.BaseUrl + "/");
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("TCGSignal/1.0 (+https://pokemon.tcg-portfolio-sample.app)");
+        client.DefaultRequestHeaders.Add("Accept", "application/json");
+    })
+    .AddStandardResilienceHandler();
+builder.Services.AddSingleton(new SealedStore(normalizedConnectionString));
+
 builder.Services.AddSingleton(builder.Configuration.GetSection(SnapshotOptions.SectionName).Get<SnapshotOptions>() ?? new());
 builder.Services.AddScoped<PriceSnapshotService>();
 builder.Services.AddScoped<PriceGuideService>();
@@ -150,6 +162,7 @@ app.UseMiddleware<DatabaseReadinessMiddleware>();
 app.UseRateLimiter();
 
 app.MapPriceGuide();
+app.MapSealed();
 app.MapPredictions();
 app.MapProduct();
 app.MapAccounts();

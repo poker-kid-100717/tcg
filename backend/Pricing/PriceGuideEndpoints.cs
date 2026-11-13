@@ -59,8 +59,16 @@ public static class PriceGuideEndpoints
             PriceSnapshotService snapshots,
             AlertEvaluationService alerts,
             AlertEmailService alertEmails,
+            AccountStore accounts,
+            TimeProvider clock,
+            ILogger<PriceSnapshotService> logger,
             CancellationToken ct) =>
         {
+            // Housekeeping first, so it happens even on a day the price feed is down: browser profiles
+            // that never saved anything are removed after 30 days (see the Privacy Policy).
+            var removed = await accounts.DeleteAbandonedProfilesAsync(clock.GetUtcNow().AddDays(-30), ct);
+            if (removed > 0) logger.LogInformation("Removed {Count} unused browser profiles", removed);
+
             var result = await snapshots.RunAsync(ct);
             if (result is null) return Results.Conflict(new { message = "A snapshot run is already in progress." });
             if (result.Status == SnapshotStatus.Succeeded)

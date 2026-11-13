@@ -16,7 +16,7 @@ public static class ProductEndpoints
             EntitlementService entitlements,
             CancellationToken ct) =>
         {
-            var user = await sessions.GetOrCreateAsync(context, ct);
+            var user = await sessions.CurrentAsync(context, ct);
             return Results.Ok(await entitlements.GetAccountAsync(user, ct));
         });
 
@@ -29,7 +29,7 @@ public static class ProductEndpoints
             MarketIntelligenceService intelligence,
             CancellationToken ct) =>
         {
-            var user = await sessions.GetOrCreateAsync(context, ct);
+            var user = await sessions.CurrentAsync(context, ct);
             var account = await entitlements.GetAccountAsync(user, ct);
             if (!account.IsPro) return ProRequired();
             return await intelligence.GetAsync(id, variant, ct) is { } value
@@ -43,7 +43,7 @@ public static class ProductEndpoints
             ProductStore store,
             CancellationToken ct) =>
         {
-            var user = await sessions.GetOrCreateAsync(context, ct);
+            var user = await sessions.CurrentAsync(context, ct);
             return Results.Ok(await store.GetWatchlistAsync(user.Id, ct));
         });
 
@@ -97,7 +97,7 @@ public static class ProductEndpoints
         {
             var error = ValidateThresholds(request.TargetBelow, request.TargetAbove, request.MovePercent);
             if (error is not null) return Results.ValidationProblem(new Dictionary<string, string[]> { ["alert"] = [error] });
-            var user = await sessions.GetOrCreateAsync(context, ct);
+            var user = await sessions.CurrentAsync(context, ct);
             return await store.UpdateWatchlistAsync(user.Id, id, request, ct) ? Results.NoContent() : Results.NotFound();
         });
 
@@ -108,7 +108,7 @@ public static class ProductEndpoints
             ProductStore store,
             CancellationToken ct) =>
         {
-            var user = await sessions.GetOrCreateAsync(context, ct);
+            var user = await sessions.CurrentAsync(context, ct);
             return await store.DeleteWatchlistAsync(user.Id, id, ct) ? Results.NoContent() : Results.NotFound();
         });
 
@@ -118,7 +118,7 @@ public static class ProductEndpoints
             ProductStore store,
             CancellationToken ct) =>
         {
-            var user = await sessions.GetOrCreateAsync(context, ct);
+            var user = await sessions.CurrentAsync(context, ct);
             return Results.Ok(await store.GetAlertsAsync(user.Id, 50, ct));
         });
 
@@ -130,7 +130,7 @@ public static class ProductEndpoints
             TimeProvider clock,
             CancellationToken ct) =>
         {
-            var user = await sessions.GetOrCreateAsync(context, ct);
+            var user = await sessions.CurrentAsync(context, ct);
             return await store.MarkAlertReadAsync(user.Id, id, clock.GetUtcNow(), ct) ? Results.NoContent() : Results.NotFound();
         });
 
@@ -141,7 +141,7 @@ public static class ProductEndpoints
             TimeProvider clock,
             CancellationToken ct) =>
         {
-            var user = await sessions.GetOrCreateAsync(context, ct);
+            var user = await sessions.CurrentAsync(context, ct);
             await store.MarkAllAlertsReadAsync(user.Id, clock.GetUtcNow(), ct);
             return Results.NoContent();
         });
@@ -153,7 +153,7 @@ public static class ProductEndpoints
             ProductStore store,
             CancellationToken ct) =>
         {
-            var user = await sessions.GetOrCreateAsync(context, ct);
+            var user = await sessions.CurrentAsync(context, ct);
             var account = await entitlements.GetAccountAsync(user, ct);
             var watchlist = await store.GetWatchlistAsync(user.Id, ct);
             var alerts = await store.GetAlertsAsync(user.Id, 20, ct);
@@ -166,7 +166,7 @@ public static class ProductEndpoints
             MasterSetStore masterSets,
             CancellationToken ct) =>
         {
-            var user = await sessions.GetOrCreateAsync(context, ct);
+            var user = await sessions.CurrentAsync(context, ct);
             return Results.Ok(await masterSets.GetSummariesAsync(user.Id, ct));
         });
 
@@ -195,7 +195,7 @@ public static class ProductEndpoints
             MasterSetStore masterSets,
             CancellationToken ct) =>
         {
-            var user = await sessions.GetOrCreateAsync(context, ct);
+            var user = await sessions.CurrentAsync(context, ct);
             return await masterSets.GetDetailAsync(user.Id, id, ct) is { } value
                 ? Results.Ok(value)
                 : Results.NotFound();
@@ -214,7 +214,7 @@ public static class ProductEndpoints
                 return Results.ValidationProblem(new Dictionary<string, string[]> { ["ownedQuantity"] = ["Owned quantity cannot be negative."] });
             if (request.AcquiredPrice < 0)
                 return Results.ValidationProblem(new Dictionary<string, string[]> { ["acquiredPrice"] = ["Acquired price cannot be negative."] });
-            var user = await sessions.GetOrCreateAsync(context, ct);
+            var user = await sessions.CurrentAsync(context, ct);
             return await masterSets.UpdateItemAsync(user.Id, id, request, clock.GetUtcNow(), ct)
                 ? Results.NoContent()
                 : Results.NotFound();
@@ -227,7 +227,7 @@ public static class ProductEndpoints
             MasterSetStore masterSets,
             CancellationToken ct) =>
         {
-            var user = await sessions.GetOrCreateAsync(context, ct);
+            var user = await sessions.CurrentAsync(context, ct);
             return await masterSets.DeleteAsync(user.Id, id, ct) ? Results.NoContent() : Results.NotFound();
         });
 
@@ -239,7 +239,7 @@ public static class ProductEndpoints
             MasterSetService service,
             CancellationToken ct) =>
         {
-            var user = await sessions.GetOrCreateAsync(context, ct);
+            var user = await sessions.CurrentAsync(context, ct);
             var account = await entitlements.GetAccountAsync(user, ct);
             if (!account.IsPro) return ProRequired();
             return await service.GetAdvisorContextAsync(user.Id, id, ct) is { } value
@@ -258,7 +258,7 @@ public static class ProductEndpoints
             StripeBillingService stripe,
             CancellationToken ct) =>
         {
-            var user = await sessions.GetOrCreateAsync(context, ct);
+            var user = await sessions.CurrentAsync(context, ct);
             var account = await entitlements.GetAccountAsync(user, ct);
             if (request.Plan is not ("monthly" or "annual" or "storefinder" or "complete"))
                 return Results.ValidationProblem(new Dictionary<string, string[]> { ["plan"] = ["Choose a supported subscription plan."] });
@@ -296,7 +296,7 @@ public static class ProductEndpoints
         {
             if (!options.StripeConfigured)
                 return Results.Problem(statusCode: 503, title: "Billing is in preview mode");
-            var user = await sessions.GetOrCreateAsync(context, ct);
+            var user = await sessions.CurrentAsync(context, ct);
             var subscription = await store.GetSubscriptionAsync(user.Id, ct);
             if (string.IsNullOrWhiteSpace(subscription?.CustomerId))
                 return Results.Problem(statusCode: 400, title: "No billing account exists yet.");

@@ -1,0 +1,53 @@
+name: run-price-snapshot
+
+# Runs the daily price job (the same code the 11:15 UTC Cron Trigger runs in the container) on demand:
+# for a first run after a deploy, a rerun after a failed day, or a check that the price feed still works.
+# It starts the API on the runner against the production database and calls /internal/snapshots locally.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tcg-price-snapshot
+  cancel-in-progress: false
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Build API
+        run: dotnet build backend/pokemon-tcg-api.csproj --configuration Release
+
+      - name: Run the daily price job
+        shell: bash
+        env:
+          ASPNETCORE_ENVIRONMENT: Production
+          ASPNETCORE_URLS: http://127.0.0.1:8080
+          ConnectionStrings__DefaultConnection: ${{ secrets.DATABASE_URL }}
+          PokemonTcgApi__ApiKey: ${{ secrets.POKEMONTCG_API_KEY }}
+          Email__ResendApiKey: ${{ secrets.RESEND_API_KEY }}
+          Email__From: ${{ secrets.EMAIL_FROM }}
+          Email__ReplyTo: ${{ secrets.EMAIL_REPLY_TO }}
+        run: |
+          set -euo pipefail
+          dotnet run --project backend/pokemon-tcg-api.csproj --configuration Release --no-build > api.log 2>&1 &
+
+          for attempt in $(seq 1 60); do
+            if curl --silent --fail http://127.0.0.1:8080/health > /dev/null; then break; fi
+            sleep 2
+          done
+          curl --silent --fail http://127.0.0.1:8080/health > /dev/null || { cat api.log; exit 1; }
+
+          result="$(curl --silent --show-error --max-time 2100 -X POST http://127.0.0.1:8080/internal/snapshots)"
+          echo "$result"
+          grep -E 'Matched|snapshot run|Removed|alert' api.log || true
+          echo "$result" | grep -q '"status":"Succeeded"' || { tail -n 80 api.log; exit 1; }

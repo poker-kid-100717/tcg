@@ -65,4 +65,13 @@ describe('ProPage', () => {
     expect(await screen.findByRole('button', { name: /Add Store Finder/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Choose Complete/ })).toBeInTheDocument();
   });
+
+  it('says everything is free while billing is off, with nothing to buy', async () => {
+    mockApi({ '/api/session': { ...liveBilling, billingConfigured: false, isPro: true, plan: 'preview', mode: 'Free beta' } });
+    renderPro();
+
+    expect(await screen.findByText('Everything in TCG Signal is free right now.')).toBeInTheDocument();
+    expect(screen.queryByText(/\$9\.99/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Choose/ })).not.toBeInTheDocument();
+  });
 });

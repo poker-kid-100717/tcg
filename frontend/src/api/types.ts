@@ -444,3 +444,29 @@ export interface NearbyInventory {
   providers: InventoryProviderCoverage[];
   accuracyPolicy: string;
 }
+
+export interface SealedProduct {
+  productId: number;
+  name: string;
+  setName: string;
+  setId: string | null;
+  productType: string;
+  imageUrl: string | null;
+  tcgplayerUrl: string | null;
+  releasedOn: string | null;
+  /** Null when the MSRP isn't known; the page says so rather than guessing. */
+  msrp: number | null;
+  /** "listed" (curated for this product) or "typical" (usual price for its type). */
+  msrpSource: 'listed' | 'typical' | null;
+  market: number | null;
+  low: number | null;
+  asOf: string | null;
+  change30Percent: number | null;
+  percentOverMsrp: number | null;
+}
+
+export interface SealedList {
+  asOf: string | null;
+  types: string[];
+  products: SealedProduct[];
+}

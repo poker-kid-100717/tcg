@@ -6,6 +6,13 @@ public sealed class BillingOptions
 {
     public const string SectionName = "Billing";
 
+    /// <summary>
+    /// Master switch for paid plans, off by default. Prices currently come from TCGCSV, which is meant for
+    /// free tools, so billing stays off until a licensed price provider replaces it. With it off the whole
+    /// app is free (the free beta), whatever Stripe keys are configured.
+    /// </summary>
+    public bool Enabled { get; set; }
+
     public string StripeSecretKey { get; set; } = "";
     public string StripeWebhookSecret { get; set; } = "";
     public string ProMonthlyPriceId { get; set; } = "";
@@ -15,6 +22,7 @@ public sealed class BillingOptions
     public string SiteUrl { get; set; } = "https://pokemon.tcg-portfolio-sample.app";
 
     public bool StripeConfigured =>
+        Enabled &&
         !string.IsNullOrWhiteSpace(StripeSecretKey) &&
         !string.IsNullOrWhiteSpace(StripeWebhookSecret);
 
@@ -50,8 +58,8 @@ public sealed class EntitlementService(
     {
         var subscription = await store.GetSubscriptionAsync(user.Id, cancellationToken);
 
-        // Until Stripe is configured, the production app runs as a founding preview:
-        // paid workflows can be exercised without fake checkout or fake stock data.
+        // With billing off (or Stripe not configured) the app is a free beta: every feature is unlocked
+        // and nothing can be bought.
         if (!billing.IsConfigured)
         {
             return new AccountView(
@@ -62,7 +70,7 @@ public sealed class EntitlementService(
                 features.StoreFinder,
                 "preview",
                 null,
-                "Founding preview",
+                "Free beta",
                 user.SignedIn,
                 user.Email,
                 user.EmailAlerts,
