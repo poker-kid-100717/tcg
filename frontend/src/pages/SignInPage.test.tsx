@@ -20,6 +20,7 @@ const anonymous: Account = {
   email: null,
   emailAlerts: true,
   signInAvailable: true,
+  storeFinderAvailable: false,
 };
 
 function renderSignIn(path: string) {

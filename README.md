@@ -569,6 +569,8 @@ Current implemented Inventory.Service provider adapter.
 
 Inventory.Service consumes the provider through `IInventoryProvider`; retailer-specific behavior does not leak into the client contract.
 
+Store Finder is offered only while a retailer source exists. The Worker sets `Features__StoreFinder=true` on the Core API when `BESTBUY_API_KEY` is configured; without it, the Store Finder and Complete plans are hidden, their checkout is refused, and the founding preview does not unlock Store Finder.
+
 ---
 
 ## 12. Identity and authorization

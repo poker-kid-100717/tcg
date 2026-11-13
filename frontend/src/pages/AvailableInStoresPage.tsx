@@ -77,6 +77,24 @@ export default function AvailableInStoresPage() {
   if (session.isPending) return <Loading label="Loading your account…" />;
   if (session.error) return <ErrorState error={session.error} onRetry={() => session.refetch()} />;
 
+  if (!session.data.hasStoreFinder && !session.data.storeFinderAvailable) {
+    return (
+      <div className="container-custom py-10">
+        <section className="panel mx-auto grid max-w-2xl gap-4 p-7 text-center">
+          <p className="eyebrow">Available in Stores</p>
+          <h1 className="text-3xl">Store Finder is coming soon.</h1>
+          <p className="text-slate-600">
+            We only show store inventory from retailer sources we have verified, and none are connected yet. Until then,
+            the price guide, watchlist alerts and master sets are all available.
+          </p>
+          <Link to="/watchlist" className="btn mx-auto bg-pokemon-pokeblue text-white">
+            Go to your watchlist
+          </Link>
+        </section>
+      </div>
+    );
+  }
+
   if (!session.data.hasStoreFinder) {
     return (
       <div className="container-custom py-10">

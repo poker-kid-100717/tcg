@@ -253,6 +253,8 @@ export interface Account {
   emailAlerts: boolean;
   /** False until an email provider is configured; sign-in can't be offered without one. */
   signInAvailable: boolean;
+  /** False until a retailer source is configured; Store Finder plans are hidden until then. */
+  storeFinderAvailable: boolean;
 }
 
 export interface SoldComp {

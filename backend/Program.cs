@@ -81,6 +81,7 @@ builder.Services.AddScoped<PredictionService>();
 // the app deliberately runs as a full-feature founding preview.
 var billingOptions = builder.Configuration.GetSection(BillingOptions.SectionName).Get<BillingOptions>() ?? new();
 builder.Services.AddSingleton(billingOptions);
+builder.Services.AddSingleton(builder.Configuration.GetSection(FeatureOptions.SectionName).Get<FeatureOptions>() ?? new());
 builder.Services.AddSingleton(new ProductStore(normalizedConnectionString));
 builder.Services.AddSingleton(new MasterSetStore(normalizedConnectionString));
 builder.Services.AddScoped<MasterSetService>();

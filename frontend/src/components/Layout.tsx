@@ -3,6 +3,7 @@ import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom';
 
 import { useMarketStatus, useSession } from '../api/hooks';
 import { formatDate } from '../lib/format';
+import { site } from '../lib/site';
 
 function SearchForm({ className = '' }: { className?: string }) {
   const navigate = useNavigate();
@@ -111,9 +112,20 @@ export function Layout() {
             {status.data?.lastSnapshotAt ? `, last recorded ${formatDate(status.data.lastSnapshotAt, 'short')}` : ''}.
             Not affiliated with Nintendo, The Pokémon Company or TCGplayer.
           </p>
-          <a href="https://github.com/poker-kid-100717/tcg" className="font-semibold hover:text-slate-900">
-            Source on GitHub
-          </a>
+          <nav aria-label="Legal" className="flex items-center gap-4 font-semibold">
+            <Link to="/terms" className="hover:text-slate-900">
+              Terms
+            </Link>
+            <Link to="/privacy" className="hover:text-slate-900">
+              Privacy
+            </Link>
+            <a href={`mailto:${site.supportEmail}`} className="hover:text-slate-900">
+              Support
+            </a>
+            <a href="https://github.com/poker-kid-100717/tcg" className="hover:text-slate-900">
+              Source on GitHub
+            </a>
+          </nav>
         </div>
       </footer>
     </div>

@@ -12,7 +12,8 @@ public record AccountView(
     bool SignedIn,          // signed in with a verified email
     string? Email,          // the verified email, when signed in
     bool EmailAlerts,
-    bool SignInAvailable);  // false when no email provider is configured
+    bool SignInAvailable,   // false when no email provider is configured
+    bool StoreFinderAvailable); // false until Inventory.Service has a retailer source
 
 public record WatchlistItemView(
     long Id,
