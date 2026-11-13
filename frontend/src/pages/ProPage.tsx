@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 
 import { api, ApiError } from '../api/client';
 import { useSession } from '../api/hooks';
@@ -174,6 +174,16 @@ export default function ProPage() {
       </div>
 
       {error && <p className="mx-auto max-w-xl rounded-lg bg-red-50 px-4 py-3 text-center text-sm text-red-800">{error}</p>}
+
+      {!preview && (
+        <p className="mx-auto max-w-xl text-center text-xs leading-5 text-slate-500">
+          Subscriptions renew automatically until you cancel, which you can do any time from your account. See the{' '}
+          <Link to="/terms" className="font-semibold text-pokemon-blue">
+            Terms of Service
+          </Link>
+          .
+        </p>
+      )}
 
       {storeFinder && (
         <>

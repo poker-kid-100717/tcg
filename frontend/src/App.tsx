@@ -23,6 +23,8 @@ const AvailableInStoresPage = lazy(() => import('./pages/AvailableInStoresPage')
 const SignInPage = lazy(() => import('./pages/SignInPage'));
 const AccountPage = lazy(() => import('./pages/AccountPage'));
 const UnsubscribePage = lazy(() => import('./pages/UnsubscribePage'));
+const TermsPage = lazy(() => import('./pages/TermsPage'));
+const PrivacyPage = lazy(() => import('./pages/PrivacyPage'));
 
 export default function App() {
   return (
@@ -48,6 +50,8 @@ export default function App() {
             <Route path="sign-in" element={<SignInPage />} />
             <Route path="account" element={<AccountPage />} />
             <Route path="email/unsubscribe" element={<UnsubscribePage />} />
+            <Route path="terms" element={<TermsPage />} />
+            <Route path="privacy" element={<PrivacyPage />} />
             <Route path="*" element={<NotFound />} />
           </Route>
         </Routes>

@@ -97,6 +97,17 @@ export default function SignInPage() {
           <button type="submit" className="btn bg-pokemon-pokeblue text-white" disabled={sending || !email.trim()}>
             {sending ? 'Sending…' : 'Email me a code'}
           </button>
+          <p className="text-xs text-slate-500">
+            By signing in you agree to the{' '}
+            <Link to="/terms" className="font-semibold text-pokemon-blue">
+              Terms of Service
+            </Link>{' '}
+            and{' '}
+            <Link to="/privacy" className="font-semibold text-pokemon-blue">
+              Privacy Policy
+            </Link>
+            .
+          </p>
         </form>
       ) : (
         <form className="grid gap-4" onSubmit={submitCode}>
