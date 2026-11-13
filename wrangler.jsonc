@@ -18,6 +18,12 @@
     {
       "pattern": "www.tcg-portfolio-sample.app",
       "custom_domain": true
+    },
+    // Primary public address for TCG Signal (alert email is sent from this
+    // name via Resend). The two routes above stay so existing links keep working.
+    {
+      "pattern": "pokemon.tcg-portfolio-sample.app",
+      "custom_domain": true
     }
   ],
   // React build served from the edge; /api/* and /health go to the Worker,

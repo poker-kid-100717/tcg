@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/poker-kid-100717/tcg/actions/workflows/ci.yml/badge.svg)](https://github.com/poker-kid-100717/tcg/actions/workflows/ci.yml)
 
-**Production:** https://tcg-portfolio-sample.app
+**Production:** https://pokemon.tcg-portfolio-sample.app (also served at https://tcg-portfolio-sample.app)
 
 TCG Signal is a cloud-hosted Pokémon TCG market-intelligence and collector platform. The application combines a React client, a .NET 10 core API, an independently deployable inventory service, PostgreSQL persistence, Cloudflare edge routing, scheduled price collection, model validation, optional billing, and optional AI-assisted collection guidance.
 
@@ -82,7 +82,7 @@ Production is a single Cloudflare Worker with two Cloudflare Container applicati
 
 ```mermaid
 flowchart TB
-    DNS[tcg-portfolio-sample.app]
+    DNS[pokemon.tcg-portfolio-sample.app]
     W[Cloudflare Worker<br/>tcg]
 
     A[Static frontend assets<br/>frontend/dist]
