@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.EntityFrameworkCore;
 using PokemonTCG.API.Data;
 
@@ -32,7 +33,7 @@ public sealed class AlertEvaluationService(
                 (previous is null || previous.Market > below))
             {
                 created += await Add(target, "below", $"below:{below:0.00}:{current.Date}",
-                    $"{target.CardName} crossed below your {below:C} target at {current.Market:C}.",
+                    $"{target.CardName} crossed below your {Money(below)} target at {Money(current.Market)}.",
                     current.Market, cancellationToken) ? 1 : 0;
             }
 
@@ -41,7 +42,7 @@ public sealed class AlertEvaluationService(
                 (previous is null || previous.Market < above))
             {
                 created += await Add(target, "above", $"above:{above:0.00}:{current.Date}",
-                    $"{target.CardName} crossed above your {above:C} target at {current.Market:C}.",
+                    $"{target.CardName} crossed above your {Money(above)} target at {Money(current.Market)}.",
                     current.Market, cancellationToken) ? 1 : 0;
             }
 
@@ -52,7 +53,7 @@ public sealed class AlertEvaluationService(
                 if (currentMove >= move && previousMove < move)
                 {
                     created += await Add(target, "move", $"move:{move:0.##}:{current.Date}",
-                        $"{target.CardName} moved {currentMove:0.0}% from the price when you started watching it.",
+                        $"{target.CardName} moved {currentMove.ToString("0.0", CultureInfo.InvariantCulture)}% from the price when you started watching it.",
                         current.Market, cancellationToken) ? 1 : 0;
                 }
             }
@@ -78,6 +79,12 @@ public sealed class AlertEvaluationService(
             current,
             clock.GetUtcNow(),
             cancellationToken);
+
+    /// <summary>
+    /// TCGplayer prices are USD. Formatted explicitly because the container has no locale, where
+    /// the "C" format renders the generic currency sign (¤) instead of $.
+    /// </summary>
+    private static string Money(decimal value) => "$" + value.ToString("#,0.00", CultureInfo.InvariantCulture);
 
     private sealed record PriceAt(DateOnly Date, decimal Market);
 }

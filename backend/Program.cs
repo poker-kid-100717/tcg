@@ -1,8 +1,10 @@
+using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Http.Resilience;
 using PokemonTCG.API.Data;
+using PokemonTCG.API.Email;
 using PokemonTCG.API.Pricing;
 using PokemonTCG.API.Pricing.Predictions;
 using PokemonTCG.API.Product;
@@ -82,8 +84,40 @@ builder.Services.AddSingleton(billingOptions);
 builder.Services.AddSingleton(new ProductStore(normalizedConnectionString));
 builder.Services.AddSingleton(new MasterSetStore(normalizedConnectionString));
 builder.Services.AddScoped<MasterSetService>();
+builder.Services.AddSingleton(sp => new AccountStore(normalizedConnectionString, sp.GetRequiredService<ILogger<AccountStore>>()));
 builder.Services.AddScoped<SessionService>();
+builder.Services.AddScoped<SignInService>();
 builder.Services.AddScoped<EntitlementService>();
+
+// Email (sign-in codes and alert digests) goes through Resend. Without a key, development logs
+// messages instead, and a deployment reports sign-in as unavailable rather than failing silently.
+var emailOptions = builder.Configuration.GetSection(EmailOptions.SectionName).Get<EmailOptions>() ?? new();
+builder.Services.AddSingleton(emailOptions);
+if (emailOptions.IsConfigured)
+{
+    builder.Services.AddHttpClient<IEmailSender, ResendEmailSender>(client =>
+            client.BaseAddress = new Uri("https://api.resend.com/"))
+        .AddStandardResilienceHandler();
+}
+else if (builder.Environment.IsDevelopment())
+{
+    builder.Services.AddSingleton<IEmailSender, DevelopmentEmailSender>();
+}
+else
+{
+    builder.Services.AddSingleton<IEmailSender, UnavailableEmailSender>();
+}
+
+// Sign-in endpoints are limited per client IP (the Worker forwards it as X-Forwarded-For), on top
+// of the per-address and per-code limits in SignInService and AccountStore.
+var codeRequestsPerIp = builder.Configuration.GetValue("SignIn:CodeRequestsPerIp", 10);
+var verifyRequestsPerIp = builder.Configuration.GetValue("SignIn:VerifyRequestsPerIp", 30);
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.AddPolicy(AccountEndpoints.CodeRateLimit, context => PerIp(context, codeRequestsPerIp));
+    options.AddPolicy(AccountEndpoints.VerifyRateLimit, context => PerIp(context, verifyRequestsPerIp));
+});
 var scrydexOptions = builder.Configuration.GetSection(ScrydexOptions.SectionName).Get<ScrydexOptions>() ?? new();
 builder.Services.AddSingleton(scrydexOptions);
 builder.Services.AddHttpClient<ScrydexClient>(client =>
@@ -93,6 +127,7 @@ builder.Services.AddHttpClient<ScrydexClient>(client =>
 });
 builder.Services.AddScoped<MarketIntelligenceService>();
 builder.Services.AddScoped<AlertEvaluationService>();
+builder.Services.AddScoped<AlertEmailService>();
 builder.Services.AddHttpClient<StripeBillingService>();
 
 var app = builder.Build();
@@ -111,14 +146,26 @@ if (app.Environment.IsDevelopment())
 // one origin through the Worker, and the Vite dev server proxies /api.
 app.UseForwardedHeaders();
 app.UseMiddleware<DatabaseReadinessMiddleware>();
+app.UseRateLimiter();
 
 app.MapPriceGuide();
 app.MapPredictions();
 app.MapProduct();
+app.MapAccounts();
 app.MapHealthChecks("/health");
 app.MapHealthChecks("/health/live", new HealthCheckOptions { Predicate = _ => false });
 
 app.Run();
+
+static RateLimitPartition<string> PerIp(HttpContext context, int permitsPer15Minutes) =>
+    RateLimitPartition.GetFixedWindowLimiter(
+        context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = permitsPer15Minutes,
+            Window = TimeSpan.FromMinutes(15),
+            QueueLimit = 0,
+        });
 
 /// <summary>Exposed for WebApplicationFactory in the integration tests.</summary>
 public partial class Program;

@@ -8,7 +8,11 @@ public record AccountView(
     bool HasStoreFinder,
     string Plan,
     string? SubscriptionStatus,
-    string Mode);
+    string Mode,
+    bool SignedIn,          // signed in with a verified email
+    string? Email,          // the verified email, when signed in
+    bool EmailAlerts,
+    bool SignInAvailable);  // false when no email provider is configured
 
 public record WatchlistItemView(
     long Id,

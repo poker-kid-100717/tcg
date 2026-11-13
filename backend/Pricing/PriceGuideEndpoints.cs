@@ -58,11 +58,16 @@ public static class PriceGuideEndpoints
         app.MapPost("/internal/snapshots", async Task<IResult> (
             PriceSnapshotService snapshots,
             AlertEvaluationService alerts,
+            AlertEmailService alertEmails,
             CancellationToken ct) =>
         {
             var result = await snapshots.RunAsync(ct);
             if (result is null) return Results.Conflict(new { message = "A snapshot run is already in progress." });
-            if (result.Status == SnapshotStatus.Succeeded) await alerts.EvaluateAsync(ct);
+            if (result.Status == SnapshotStatus.Succeeded)
+            {
+                await alerts.EvaluateAsync(ct);
+                await alertEmails.SendPendingAsync(ct);
+            }
             return Results.Ok(result);
         });
     }

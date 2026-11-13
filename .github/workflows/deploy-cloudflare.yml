@@ -63,6 +63,9 @@ jobs:
           TCG_STRIPE_STORE_FINDER_MONTHLY_PRICE_ID: ${{ secrets.STRIPE_STORE_FINDER_MONTHLY_PRICE_ID }}
           TCG_STRIPE_COMPLETE_MONTHLY_PRICE_ID: ${{ secrets.STRIPE_COMPLETE_MONTHLY_PRICE_ID }}
           TCG_BESTBUY_API_KEY: ${{ secrets.BESTBUY_API_KEY }}
+          TCG_RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          TCG_EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+          TCG_EMAIL_REPLY_TO: ${{ secrets.EMAIL_REPLY_TO }}
         run: |
           set -euo pipefail
 
@@ -84,6 +87,9 @@ jobs:
           put_if_present TCG_STRIPE_STORE_FINDER_MONTHLY_PRICE_ID "$TCG_STRIPE_STORE_FINDER_MONTHLY_PRICE_ID"
           put_if_present TCG_STRIPE_COMPLETE_MONTHLY_PRICE_ID "$TCG_STRIPE_COMPLETE_MONTHLY_PRICE_ID"
           put_if_present TCG_BESTBUY_API_KEY "$TCG_BESTBUY_API_KEY"
+          put_if_present TCG_RESEND_API_KEY "$TCG_RESEND_API_KEY"
+          put_if_present TCG_EMAIL_FROM "$TCG_EMAIL_FROM"
+          put_if_present TCG_EMAIL_REPLY_TO "$TCG_EMAIL_REPLY_TO"
 
       - name: Verify production site and API
         shell: bash
