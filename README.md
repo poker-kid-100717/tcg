@@ -470,6 +470,8 @@ flowchart LR
 
 The `/internal/*` endpoints are callable only through the Worker scheduled handler and are not part of public routing.
 
+To run the price job on demand (a first run after a deploy, or a rerun after a failed day), use the **run-price-snapshot** GitHub Actions workflow: it starts the API on the runner against the production database and calls `/internal/snapshots` locally.
+
 ---
 
 ## 9. Prediction architecture
