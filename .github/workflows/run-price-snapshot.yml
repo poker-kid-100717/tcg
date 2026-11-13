@@ -39,7 +39,8 @@ jobs:
           Email__ReplyTo: ${{ secrets.EMAIL_REPLY_TO }}
         run: |
           set -euo pipefail
-          dotnet run --project backend/pokemon-tcg-api.csproj --configuration Release --no-build > api.log 2>&1 &
+          # --no-launch-profile: launchSettings.json would otherwise switch to Development on another port.
+          dotnet run --project backend/pokemon-tcg-api.csproj --configuration Release --no-build --no-launch-profile > api.log 2>&1 &
 
           for attempt in $(seq 1 60); do
             if curl --silent --fail http://127.0.0.1:8080/health > /dev/null; then break; fi
