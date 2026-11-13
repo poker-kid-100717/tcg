@@ -254,6 +254,7 @@ public static class ProductEndpoints
             EntitlementService entitlements,
             ProductStore store,
             BillingOptions options,
+            FeatureOptions features,
             StripeBillingService stripe,
             CancellationToken ct) =>
         {
@@ -261,6 +262,10 @@ public static class ProductEndpoints
             var account = await entitlements.GetAccountAsync(user, ct);
             if (request.Plan is not ("monthly" or "annual" or "storefinder" or "complete"))
                 return Results.ValidationProblem(new Dictionary<string, string[]> { ["plan"] = ["Choose a supported subscription plan."] });
+
+            // Never sell Store Finder while it has no retailer data to show.
+            if (request.Plan is "storefinder" or "complete" && !features.StoreFinder)
+                return Results.Problem(statusCode: 503, title: "Store Finder isn't available yet.");
 
             if (request.Plan is "monthly" or "annual" && !account.BillingConfigured)
                 return Results.Problem(statusCode: 503, title: "Pro billing is not configured yet.");

@@ -28,7 +28,23 @@ public sealed class BillingOptions
         !string.IsNullOrWhiteSpace(StoreFinderMonthlyPriceId);
 }
 
-public sealed class EntitlementService(ProductStore store, BillingOptions billing, IEmailSender email)
+/// <summary>Product features that depend on something outside this API.</summary>
+public sealed class FeatureOptions
+{
+    public const string SectionName = "Features";
+
+    /// <summary>
+    /// Store Finder is offered only while Inventory.Service has a retailer source to show. In
+    /// production the Worker turns this on when the Best Buy API key is configured.
+    /// </summary>
+    public bool StoreFinder { get; set; }
+}
+
+public sealed class EntitlementService(
+    ProductStore store,
+    BillingOptions billing,
+    FeatureOptions features,
+    IEmailSender email)
 {
     public async Task<AccountView> GetAccountAsync(AppUser user, CancellationToken cancellationToken)
     {
@@ -43,14 +59,15 @@ public sealed class EntitlementService(ProductStore store, BillingOptions billin
                 false,
                 false,
                 true,
-                true,
+                features.StoreFinder,
                 "preview",
                 null,
                 "Founding preview",
                 user.SignedIn,
                 user.Email,
                 user.EmailAlerts,
-                email.IsConfigured);
+                email.IsConfigured,
+                features.StoreFinder);
         }
 
         var active = subscription?.Status is "active" or "trialing";
@@ -61,7 +78,7 @@ public sealed class EntitlementService(ProductStore store, BillingOptions billin
         return new AccountView(
             user.Id,
             true,
-            billing.StoreFinderIsConfigured,
+            billing.StoreFinderIsConfigured && features.StoreFinder,
             isPro,
             hasStoreFinder,
             plan,
@@ -70,6 +87,7 @@ public sealed class EntitlementService(ProductStore store, BillingOptions billin
             user.SignedIn,
             user.Email,
             user.EmailAlerts,
-            email.IsConfigured);
+            email.IsConfigured,
+            features.StoreFinder);
     }
 }

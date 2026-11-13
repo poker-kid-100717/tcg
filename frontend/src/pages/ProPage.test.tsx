@@ -20,6 +20,7 @@ const liveBilling: Account = {
   email: null,
   emailAlerts: true,
   signInAvailable: true,
+  storeFinderAvailable: false,
 };
 
 function renderPro() {
@@ -46,5 +47,22 @@ describe('ProPage', () => {
 
     expect(await screen.findByText('Sign-in page')).toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/billing/checkout'))).toBe(false);
+  });
+
+  it('offers only Pro while Store Finder has no retailer source', async () => {
+    mockApi({ '/api/session': liveBilling });
+    renderPro();
+
+    expect(await screen.findByRole('button', { name: /Choose monthly/ })).toBeInTheDocument();
+    expect(screen.queryByText('Store Finder')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Complete/ })).not.toBeInTheDocument();
+  });
+
+  it('offers Store Finder and Complete once a retailer source is connected', async () => {
+    mockApi({ '/api/session': { ...liveBilling, storeFinderAvailable: true } });
+    renderPro();
+
+    expect(await screen.findByRole('button', { name: /Add Store Finder/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Choose Complete/ })).toBeInTheDocument();
   });
 });
